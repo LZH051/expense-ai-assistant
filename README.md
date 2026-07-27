@@ -1,7 +1,7 @@
-# 个人消费记账与 AI 分析助手（SQLite 版）
+# 个人消费记账与 AI 分析助手
 
-这是项目 A 的独立 SQLite 版本。数据库保存在
-`database/expense_ai.db`，不需要安装或启动 MySQL/Wampserver。
+本项目使用 SQLite 存储数据，数据库文件位于
+`database/expense_ai.db`，无需安装或启动数据库服务器。
 
 ## 功能
 
@@ -22,7 +22,6 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-SQLite 是 Python 标准库的一部分，不需要额外安装数据库驱动。
 
 ## 运行与验收
 
@@ -41,7 +40,7 @@ E:\expense-ai-assistant-sqlite\database\expense_ai.db
 
 ## AI 分析
 
-仅在 `.env` 中填写本地密钥并确认费用后运行：
+在 `.env` 中填写本地密钥并确认费用后运行：
 
 ```powershell
 python src\main.py --with-ai --confirm-paid-run
