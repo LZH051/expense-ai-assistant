@@ -1,0 +1,8 @@
+{
+  "raw_count": 86,
+  "fixed_empty_category": 1,
+  "removed_invalid_amount": 2,
+  "removed_invalid_date": 1,
+  "removed_duplicate": 1,
+  "clean_count": 82
+}

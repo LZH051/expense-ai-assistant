@@ -1,0 +1,148 @@
+{
+  "category_summary": [
+    {
+      "category": "住房",
+      "total_amount": 7221.98,
+      "expense_count": 14
+    },
+    {
+      "category": "医疗",
+      "total_amount": 4113.41,
+      "expense_count": 18
+    },
+    {
+      "category": "学习",
+      "total_amount": 4017.66,
+      "expense_count": 14
+    },
+    {
+      "category": "购物",
+      "total_amount": 3050.46,
+      "expense_count": 9
+    },
+    {
+      "category": "餐饮",
+      "total_amount": 985.81,
+      "expense_count": 9
+    },
+    {
+      "category": "娱乐",
+      "total_amount": 791.54,
+      "expense_count": 8
+    },
+    {
+      "category": "交通",
+      "total_amount": 448.92,
+      "expense_count": 9
+    },
+    {
+      "category": "其他",
+      "total_amount": 188.5,
+      "expense_count": 1
+    }
+  ],
+  "monthly_summary": [
+    {
+      "expense_month": "2026-01",
+      "total_amount": 2934.95,
+      "expense_count": 11
+    },
+    {
+      "expense_month": "2026-02",
+      "total_amount": 3849.12,
+      "expense_count": 13
+    },
+    {
+      "expense_month": "2026-03",
+      "total_amount": 4664.21,
+      "expense_count": 22
+    },
+    {
+      "expense_month": "2026-04",
+      "total_amount": 3545.12,
+      "expense_count": 12
+    },
+    {
+      "expense_month": "2026-05",
+      "total_amount": 2685.86,
+      "expense_count": 12
+    },
+    {
+      "expense_month": "2026-06",
+      "total_amount": 3139.02,
+      "expense_count": 12
+    }
+  ],
+  "budget_comparison": [
+    {
+      "month": "2026-01",
+      "category": "交通",
+      "budget_amount": 300.0,
+      "actual_amount": 82.71,
+      "difference": -217.29
+    },
+    {
+      "month": "2026-01",
+      "category": "餐饮",
+      "budget_amount": 900.0,
+      "actual_amount": 47.98,
+      "difference": -852.02
+    },
+    {
+      "month": "2026-02",
+      "category": "购物",
+      "budget_amount": 800.0,
+      "actual_amount": 1374.38,
+      "difference": 574.38
+    },
+    {
+      "month": "2026-02",
+      "category": "餐饮",
+      "budget_amount": 900.0,
+      "actual_amount": 0.0,
+      "difference": -900.0
+    },
+    {
+      "month": "2026-03",
+      "category": "娱乐",
+      "budget_amount": 400.0,
+      "actual_amount": 136.38,
+      "difference": -263.62
+    },
+    {
+      "month": "2026-03",
+      "category": "餐饮",
+      "budget_amount": 950.0,
+      "actual_amount": 159.29,
+      "difference": -790.71
+    },
+    {
+      "month": "2026-04",
+      "category": "餐饮",
+      "budget_amount": 950.0,
+      "actual_amount": 296.49,
+      "difference": -653.51
+    },
+    {
+      "month": "2026-05",
+      "category": "餐饮",
+      "budget_amount": 1000.0,
+      "actual_amount": 136.26,
+      "difference": -863.74
+    },
+    {
+      "month": "2026-06",
+      "category": "学习",
+      "budget_amount": 1500.0,
+      "actual_amount": 1299.0,
+      "difference": -201.0
+    },
+    {
+      "month": "2026-06",
+      "category": "餐饮",
+      "budget_amount": 1000.0,
+      "actual_amount": 345.79,
+      "difference": -654.21
+    }
+  ]
+}
