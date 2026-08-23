@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}登录｜安心账本{% endblock %}
+{% block content %}
+<section class="auth-shell">
+    <div class="auth-card">
+        <span class="eyebrow">欢迎回来</span>
+        <h1>登录账户</h1>
+        <p class="muted">继续查看你的消费、预算和统计。</p>
+        {% if errors %}<div class="form-errors">{% for error in errors %}<p>{{ error }}</p>{% endfor %}</div>{% endif %}
+        <form class="form-stack" method="post" action="/login">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label>邮箱<input type="email" name="email" required autocomplete="email" value="{{ form.email if form else '' }}"></label>
+            <label>密码<input type="password" name="password" required autocomplete="current-password"></label>
+            <button class="button button-full" type="submit">安全登录</button>
+        </form>
+        <p class="auth-switch">还没有账户？<a href="/register">免费注册</a></p>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}消费记录｜安心账本{% endblock %}
+{% block content %}
+<section class="page-shell app-page">
+    <div class="page-heading heading-actions">
+        <div><span class="eyebrow">消费管理</span><h1>消费记录</h1><p>查看、筛选、修改或删除自己的记录。</p></div>
+        <a class="button" href="/expenses/new">＋ 新增消费</a>
+    </div>
+
+    <section class="panel">
+        <form class="filter-row" method="get" action="/expenses">
+            <label>按类别筛选
+                <select name="category">
+                    <option value="">全部类别</option>
+                    {% for category in categories %}<option value="{{ category }}" {% if category == selected_category %}selected{% endif %}>{{ category }}</option>{% endfor %}
+                </select>
+            </label>
+            <label>开始日期
+                <input type="date" name="start_date" value="{{ selected_start_date }}">
+            </label>
+            <label>结束日期
+                <input type="date" name="end_date" value="{{ selected_end_date }}">
+            </label>
+            <button class="button button-secondary button-small" type="submit">筛选</button>
+            {% if selected_category or selected_start_date or selected_end_date %}
+            <a class="button button-ghost button-small" href="/expenses">清除筛选</a>
+            {% endif %}
+        </form>
+        {% if expenses %}
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>日期</th><th>类别</th><th>金额</th><th>商家/地点</th><th>说明</th><th class="right">操作</th></tr></thead>
+                <tbody>
+                {% for expense in expenses %}
+                <tr>
+                    <td data-label="日期">{{ expense.expense_date }}</td>
+                    <td data-label="类别"><span class="pill">{{ expense.category }}</span></td>
+                    <td data-label="金额" class="money">¥ {{ '%.2f'|format(expense.amount) }}</td>
+                    <td data-label="商家/地点">{{ expense.merchant or '—' }}</td>
+                    <td data-label="说明" class="truncate">{{ expense.description or '—' }}</td>
+                    <td data-label="操作" class="actions right">
+                        <a href="/expenses/{{ expense.id }}/edit">编辑</a>
+                        <form method="post" action="/expenses/{{ expense.id }}/delete" data-confirm="确定删除这条消费记录吗？删除后不能恢复。">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button class="link-danger" type="submit">删除</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}<div class="empty-state"><b>没有符合条件的消费记录</b><p>新增消费或调整筛选条件。</p></div>{% endif %}
+    </section>
+</section>
+{% endblock %}

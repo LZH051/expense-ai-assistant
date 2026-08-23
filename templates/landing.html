@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}安心账本｜把每一笔钱看清楚{% endblock %}
+{% block content %}
+<section class="hero page-shell">
+    <div class="hero-copy">
+        <span class="eyebrow">个人财务管理，从清晰开始</span>
+        <h1>记录今天的每一笔，<br><span>看见明天的余量。</span></h1>
+        <p>安心账本帮助你管理消费、设置预算并理解资金去向。每个账户的数据独立保存，电脑和手机都能使用。</p>
+        <div class="hero-actions">
+            <a class="button" href="/register">创建我的账本</a>
+            <a class="button button-secondary" href="/login">已有账户，登录</a>
+        </div>
+        <div class="trust-row">
+            <span>✓ 密码加密存储</span>
+            <span>✓ 用户数据隔离</span>
+            <span>✓ 支持完整增删改查</span>
+        </div>
+    </div>
+    <div class="hero-preview" aria-label="产品预览">
+        <div class="preview-top"><span>本月概览</span><span class="status-dot">实时</span></div>
+        <div class="preview-amount"><small>本月支出</small><strong>¥ 3,286.40</strong></div>
+        <div class="preview-grid">
+            <div><small>预算余额</small><b>¥ 1,713.60</b></div>
+            <div><small>消费笔数</small><b>26 笔</b></div>
+        </div>
+        <div class="mini-chart">
+            <span style="height:45%"></span><span style="height:68%"></span>
+            <span style="height:38%"></span><span style="height:82%"></span>
+            <span style="height:58%"></span><span style="height:92%"></span>
+            <span style="height:64%"></span>
+        </div>
+    </div>
+</section>
+
+<section class="feature-section page-shell">
+    <div class="section-heading">
+        <span class="eyebrow">核心功能</span>
+        <h2>一套简单但完整的记账流程</h2>
+    </div>
+    <div class="feature-grid">
+        <article><span class="feature-icon">记</span><h3>快速记账</h3><p>记录日期、类别、金额、商户和说明，随时修改或删除。</p></article>
+        <article><span class="feature-icon">预</span><h3>预算控制</h3><p>按月份和类别设置预算，及时了解本月可用余额。</p></article>
+        <article><span class="feature-icon">析</span><h3>清晰统计</h3><p>通过类别排行与月度汇总，快速理解主要消费方向。</p></article>
+    </div>
+</section>
+{% endblock %}

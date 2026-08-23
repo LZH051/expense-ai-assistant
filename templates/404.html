@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block title %}页面不存在｜安心账本{% endblock %}
+{% block content %}
+<section class="not-found page-shell"><span>404</span><h1>没有找到这个页面</h1><p>页面可能已经移动或被删除。</p><a class="button" href="{{ '/dashboard' if current_user else '/' }}">返回首页</a></section>
+{% endblock %}

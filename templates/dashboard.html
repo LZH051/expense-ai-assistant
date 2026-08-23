@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}财务概览｜安心账本{% endblock %}
+{% block content %}
+<section class="page-shell app-page">
+    <div class="page-heading heading-actions">
+        <div><span class="eyebrow">财务概览</span><h1>{{ current_user.username }}，你好</h1><p>这里是你的个人消费摘要。</p></div>
+        <a class="button" href="/expenses/new">＋ 记一笔</a>
+    </div>
+
+    {% if budget_exceeded %}
+    <div class="budget-alert" role="alert">
+        <strong>本月预算已超出 ¥ {{ '%.2f'|format(-budget_remaining) }}</strong>
+        <span>建议检查近期消费，并调整本月剩余支出计划。</span>
+    </div>
+    {% endif %}
+
+    <div class="stat-grid">
+        <article class="stat-card accent"><small>累计支出</small><strong>¥ {{ '%.2f'|format(total) }}</strong><span>全部消费记录</span></article>
+        <article class="stat-card"><small>{{ month_key }} 支出</small><strong>¥ {{ '%.2f'|format(month_total) }}</strong><span>本月累计</span></article>
+        <article class="stat-card {% if budget_exceeded %}over-budget{% endif %}"><small>本月预算</small><strong>¥ {{ '%.2f'|format(budget_total) }}</strong><span>{% if budget_exceeded %}已超出 ¥ {{ '%.2f'|format(-budget_remaining) }}{% elif budget_total %}剩余 ¥ {{ '%.2f'|format(budget_remaining) }}{% else %}尚未设置{% endif %}</span></article>
+        <article class="stat-card"><small>消费笔数</small><strong>{{ expense_count }}</strong><span>已保存记录</span></article>
+    </div>
+
+    <div class="dashboard-grid">
+        <section class="panel">
+            <div class="panel-heading"><div><h2>类别排行</h2><p>累计支出最高的类别</p></div></div>
+            {% if category_rows %}
+            <div class="category-bars">
+                {% for row in category_rows %}
+                <div class="bar-row">
+                    <div><span>{{ row.category }}</span><b>¥ {{ '%.2f'|format(row.total) }}</b></div>
+                    <div class="bar-track"><span style="width: {{ ((row.total / category_rows[0].total) * 100)|round }}%"></span></div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}<div class="empty-state"><b>还没有统计数据</b><p>添加第一笔消费后，这里会显示类别排行。</p></div>{% endif %}
+        </section>
+
+        <section class="panel">
+            <div class="panel-heading"><div><h2>最近消费</h2><p>最近保存的8条记录</p></div><a href="/expenses">查看全部</a></div>
+            {% if recent %}
+            <div class="recent-list">
+                {% for expense in recent %}
+                <a href="/expenses/{{ expense.id }}/edit">
+                    <span class="category-badge">{{ expense.category[0] }}</span>
+                    <span><b>{{ expense.category }}</b><small>{{ expense.expense_date }} · {{ expense.merchant or '未填写商家或地点' }}</small></span>
+                    <strong>− ¥ {{ '%.2f'|format(expense.amount) }}</strong>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}<div class="empty-state"><b>还没有消费记录</b><p>点击“记一笔”开始使用。</p></div>{% endif %}
+        </section>
+    </div>
+</section>
+{% endblock %}

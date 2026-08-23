@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% set editing = expense is not none %}
+{% block title %}{{ '修改消费' if editing else '新增消费' }}｜安心账本{% endblock %}
+{% block content %}
+<section class="page-shell app-page narrow-page">
+    <div class="page-heading"><span class="eyebrow">{{ '更新已有记录' if editing else '记录一笔消费' }}</span><h1>{{ '修改消费' if editing else '新增消费' }}</h1><p>请填写真实、准确的消费信息。</p></div>
+    <section class="panel form-panel">
+        {% if errors %}<div class="form-errors">{% for error in errors %}<p>{{ error }}</p>{% endfor %}</div>{% endif %}
+        <form class="form-grid" method="post" action="{{ '/expenses/' ~ expense.id ~ '/edit' if editing else '/expenses/new' }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label>消费日期<input type="date" name="expense_date" required value="{{ form.get('expense_date', expense.expense_date.isoformat() if editing else '') }}"></label>
+            {% set selected_category = form.get('category', expense.category if editing else '') %}
+            {% set standard_categories = ['餐饮', '交通', '购物', '居住', '娱乐', '医疗', '教育', '旅行', '其他'] %}
+            <label>消费类别
+                <select name="category" required>
+                    <option value="" disabled {% if not selected_category %}selected{% endif %}>请选择消费类别</option>
+                    {% if selected_category and selected_category not in standard_categories %}<option value="" disabled selected>原类别：{{ selected_category }}，请重新选择</option>{% endif %}
+                    {% for category in standard_categories %}<option value="{{ category }}" {% if category == selected_category %}selected{% endif %}>{{ category }}</option>{% endfor %}
+                </select>
+            </label>
+            <label>消费金额<input type="text" inputmode="decimal" name="amount" required pattern="[0-9]+([.][0-9]{1,2})?" maxlength="14" placeholder="例如：98.50" value="{{ form.get('amount', expense.amount if editing else '') }}"></label>
+            <label>商家或消费地点<input name="merchant" maxlength="120" placeholder="例如：学校食堂；没有可留空" value="{{ form.get('merchant', expense.merchant if editing and expense.merchant else '') }}"></label>
+            <label class="full-width">说明<textarea name="description" maxlength="1000" rows="4" placeholder="可选，记录这笔消费的用途">{{ form.get('description', expense.description if editing and expense.description else '') }}</textarea></label>
+            <div class="form-actions full-width">
+                <a class="button button-secondary" href="/expenses">取消</a>
+                <button class="button" type="submit">{{ '保存修改' if editing else '保存消费' }}</button>
+            </div>
+        </form>
+    </section>
+</section>
+{% endblock %}

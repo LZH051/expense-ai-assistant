@@ -9,10 +9,16 @@ def count_csv_rows(path) -> int:
         return sum(1 for _ in csv.DictReader(file))
 
 
+def read_source_record_ids(path) -> set[str]:
+    with path.open("r", newline="", encoding="utf-8-sig") as file:
+        return {row["record_id"] for row in csv.DictReader(file)}
+
+
 def verify_project() -> None:
     required_tables = {"users", "expenses", "budgets"}
     raw_count = count_csv_rows(RAW_DATA_FILE)
     clean_count = count_csv_rows(CLEAN_DATA_FILE)
+    clean_source_ids = read_source_record_ids(CLEAN_DATA_FILE)
 
     connection = connect_to_database()
     try:
@@ -23,6 +29,8 @@ def verify_project() -> None:
         user_count = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM expenses")
         expense_count = cursor.fetchone()[0]
+        cursor.execute("SELECT source_record_id FROM expenses")
+        database_source_ids = {row[0] for row in cursor.fetchall()}
         cursor.execute("SELECT COUNT(*) FROM budgets")
         budget_count = cursor.fetchone()[0]
         cursor.execute(
@@ -47,8 +55,10 @@ def verify_project() -> None:
 
     assert required_tables.issubset(table_names), "缺少 SQLite 数据表"
     assert 50 <= raw_count <= 100, "原始模拟数据应为50～100条"
-    assert clean_count == expense_count, "清洗数据与 SQLite 入库数量不一致"
+    assert clean_source_ids.issubset(database_source_ids), "部分清洗数据尚未入库"
     assert orphan_expenses == 0 and orphan_budgets == 0, "存在无效外键数据"
+
+    manual_count = len(database_source_ids - clean_source_ids)
 
     print(f"SQLite：{get_database_path()}")
     print(f"数据库表：{', '.join(sorted(required_tables))}")
@@ -56,6 +66,7 @@ def verify_project() -> None:
     print(f"清洗数据：{clean_count} 条")
     print(f"用户：{user_count} 条")
     print(f"消费记录：{expense_count} 条")
+    print(f"额外手动录入：{manual_count} 条")
     print(f"预算：{budget_count} 条")
     print("外键数据检查：通过")
     print("项目A SQLite 验收：通过")

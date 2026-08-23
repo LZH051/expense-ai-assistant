@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}账户设置｜安心账本{% endblock %}
+{% block content %}
+<section class="page-shell app-page">
+    <div class="page-heading"><span class="eyebrow">账户与安全</span><h1>账户设置</h1><p>管理个人资料、密码以及账户数据。</p></div>
+    <div class="settings-grid">
+        <section class="panel form-panel">
+            <h2>个人资料</h2>
+            <form class="form-stack" method="post" action="/account/profile">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <label>用户名<input name="username" required minlength="2" maxlength="50" value="{{ current_user.username }}"></label>
+                <label>邮箱<input type="email" name="email" required maxlength="255" value="{{ current_user.email }}"></label>
+                <button class="button" type="submit">保存资料</button>
+            </form>
+        </section>
+        <section class="panel form-panel">
+            <h2>修改密码</h2>
+            <form class="form-stack" method="post" action="/account/password">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <label>当前密码<input type="password" name="current_password" required autocomplete="current-password"></label>
+                <label>新密码<input type="password" name="new_password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
+                <label>确认新密码<input type="password" name="new_password_confirm" required minlength="8" maxlength="128" autocomplete="new-password"></label>
+                <button class="button" type="submit">更新密码</button>
+            </form>
+        </section>
+    </div>
+    <section class="panel danger-zone">
+        <div><h2>删除账户</h2><p>删除后，你的消费和预算将一起永久删除，无法恢复。</p></div>
+        <form class="danger-form" method="post" action="/account/delete" data-confirm="这是永久操作。确定删除整个账户及全部数据吗？">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label>输入 DELETE 确认<input name="confirmation" required autocomplete="off"></label>
+            <label>输入当前密码<input type="password" name="password" required autocomplete="current-password"></label>
+            <button class="button button-danger" type="submit">永久删除账户</button>
+        </form>
+    </section>
+</section>
+{% endblock %}
