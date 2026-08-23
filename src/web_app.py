@@ -8,7 +8,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
@@ -43,7 +43,14 @@ if not SESSION_SECRET:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    if engine.dialect.name == "postgresql":
+        # Vercel may start several functions at the same time. Serializing the
+        # schema check prevents concurrent CREATE TABLE statements from racing.
+        with engine.begin() as connection:
+            connection.execute(text("SELECT pg_advisory_xact_lock(2077468312)"))
+            Base.metadata.create_all(bind=connection)
+    else:
+        Base.metadata.create_all(bind=engine)
     yield
 
 
