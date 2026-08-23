@@ -1,15 +1,22 @@
-# 个人消费记账与 AI 分析助手
+# 安心账本｜个人消费与预算管理
 
-本项目使用 SQLite 存储数据，数据库文件位于
-`database/expense_ai.db`，无需安装或启动数据库服务器。
+项目一现包含两个可独立运行的版本：
 
-## 功能
+- 原SQLite命令行版：模拟数据、ETL、统计和可选AI分析。
+- 多用户Web版：注册登录、数据隔离、消费增删改查、预算和仪表盘。
 
-- 生成50～100条模拟消费记录并清洗异常、空值和重复数据
-- 创建 `users`、`expenses`、`budgets` 三张 SQLite 表
-- 使用唯一约束和 `INSERT OR IGNORE` 保证重复运行不重复入库
-- 按类别、月份统计消费并进行预算对比
-- 可选调用 OpenAI 兼容接口生成消费建议
+## Web版功能
+
+- 任何人可以使用邮箱注册个人账户
+- 密码通过随机盐和 `scrypt` 哈希保存，不存储明文密码
+- 每个用户只能访问自己的消费和预算
+- 新增、查看、筛选、编辑和删除消费记录
+- 创建、更新和删除月度分类预算
+- 修改账户资料和密码
+- 用户可以永久删除账户及其全部数据
+- CSRF保护、签名会话Cookie和基础安全响应头
+- 响应式HTML界面，支持电脑和手机
+- 本地SQLite开发，线上PostgreSQL持久化
 
 ## 安装
 
@@ -22,28 +29,61 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
+## 本地运行Web版
 
-## 运行与验收
+```powershell
+python src\web_app.py
+```
+
+浏览器打开：
+
+```text
+http://127.0.0.1:8000
+```
+
+本地Web数据库默认保存在：
+
+```text
+database/web_expense.db
+```
+
+它与原命令行版的 `database/expense_ai.db` 分开，互不影响。
+
+## 公开部署
+
+项目已包含 `api/index.py` 和 `vercel.json`。公开部署时必须：
+
+1. 使用云端PostgreSQL数据库，设置 `DATABASE_URL`。
+2. 生成随机会话密钥，设置 `SESSION_SECRET`。
+3. 将代码上传GitHub并在Vercel导入仓库。
+
+完整步骤见 [docs/web_deployment.md](docs/web_deployment.md)。
+
+不要把真实的 `.env`、数据库密码、会话密钥或AI密钥上传GitHub。
+
+## 原命令行版
+
+完整ETL流程：
 
 ```powershell
 python src\main.py
-python src\load_database.py
 python src\verify_project.py
 ```
 
-第二次入库应显示新增0条，证明去重有效。数据库文件可用
-DB Browser for SQLite 打开：
+命令行手动记账：
 
-```text
-E:\expense-ai-assistant-sqlite\database\expense_ai.db
+```powershell
+python src\main.py --interactive
 ```
 
-## AI 分析
-
-在 `.env` 中填写本地密钥并确认费用后运行：
+可选AI分析：
 
 ```powershell
 python src\main.py --with-ai --confirm-paid-run
 ```
 
-`.env`、`.db` 和虚拟环境均已加入 `.gitignore`。
+原SQLite数据库可使用DB Browser for SQLite打开：
+
+```text
+E:\expense-ai-assistant-sqlite\database\expense_ai.db
+```

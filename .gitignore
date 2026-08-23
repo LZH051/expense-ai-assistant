@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .env
+*.db
 *.db-shm
 *.db-wal
 .pytest_cache/
