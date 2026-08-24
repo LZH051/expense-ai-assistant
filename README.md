@@ -5,11 +5,6 @@
 ## 在线体验
 
 - 网站首页：<https://expense-ai-assistant.vercel.app/>
-- 注册账户：<https://expense-ai-assistant.vercel.app/register>
-- 登录账户：<https://expense-ai-assistant.vercel.app/login>
-- 健康检查：<https://expense-ai-assistant.vercel.app/health>
-
-健康检查是供开发者确认后端是否正常运行的技术入口，普通用户直接访问网站首页即可。
 
 ## 主要功能
 
