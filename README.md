@@ -36,10 +36,6 @@
 - 显示分类消费排行和最近消费
 - 本月支出超过预算时显示红色超支提醒和超出金额
 
-### 密码重置
-
-项目已包含一次性密码重置令牌和邮件发送流程。正式使用前需要配置 Resend、发件域名和网站地址；未配置时不会向用户发送重置邮件。
-
 ## 技术栈
 
 - 后端：Python、FastAPI、SQLAlchemy
@@ -47,7 +43,6 @@
 - 本地数据库：SQLite
 - 公网数据库：Neon PostgreSQL
 - 部署平台：Vercel
-- 密码重置邮件：Resend（可选）
 
 ## 项目结构
 
@@ -94,18 +89,12 @@ AI_MODEL=doubao-seed-2-0-lite-260428
 # Web 数据库和登录会话
 DATABASE_URL=
 SESSION_SECRET=
-
-# 可选密码重置邮件
-APP_BASE_URL=
-RESEND_API_KEY=
-PASSWORD_RESET_FROM=
 ```
 
 说明：
 
 - 本地不填写 `DATABASE_URL` 时，Web 版默认使用 `database/web_expense.db`。
 - Vercel 部署必须配置云端 PostgreSQL `DATABASE_URL` 和随机的 `SESSION_SECRET`。
-- 邮件重置密码功能还需要配置 `APP_BASE_URL`、`RESEND_API_KEY` 和 `PASSWORD_RESET_FROM`。
 - 不要在 README、代码或 GitHub 中填写真实密钥。
 
 ## 本地运行网站
@@ -160,7 +149,10 @@ E:\expense-ai-assistant-sqlite\database\web_expense.db
 .\.venv\Scripts\python.exe tests\date_filter_test.py
 .\.venv\Scripts\python.exe tests\overall_budget_test.py
 .\.venv\Scripts\python.exe tests\budget_warning_test.py
-.\.venv\Scripts\python.exe tests\password_reset_test.py
+.\.venv\Scripts\python.exe tests\etl_dedup_test.py
+.\.venv\Scripts\python.exe tests\stdlib_shadow_test.py
+.\.venv\Scripts\python.exe tests\logging_setup_test.py
+.\.venv\Scripts\python.exe tests\ai_robustness_test.py
 ```
 
 ## Vercel 部署
@@ -168,8 +160,7 @@ E:\expense-ai-assistant-sqlite\database\web_expense.db
 1. 将代码上传到 GitHub，但不要上传 `.env`、`.db`、`.venv`、`__pycache__` 或日志。
 2. 在 Vercel 导入 GitHub 仓库，根目录保持 `./`。
 3. 在 Vercel 设置 `DATABASE_URL` 和 `SESSION_SECRET`。
-4. 如需邮件重置密码，再设置 `APP_BASE_URL`、`RESEND_API_KEY` 和 `PASSWORD_RESET_FROM`。
-5. 部署后访问 `/health`、`/register` 和 `/login` 检查运行状态。
+4. 部署后访问 `/health`、`/register` 和 `/login` 检查运行状态。
 
 更详细的部署说明见 [`docs/web_deployment.md`](docs/web_deployment.md)。
 
