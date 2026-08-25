@@ -1,3 +1,4 @@
+import logging
 import csv
 import json
 
@@ -8,6 +9,8 @@ from paths import (
     STATISTICS_JSON_FILE,
     ensure_directories,
 )
+
+logger = logging.getLogger(__name__)
 
 
 CATEGORY_SQL = """
@@ -86,21 +89,24 @@ def generate_statistics() -> dict:
         encoding="utf-8",
     )
 
-    print("\n按类别统计：")
+    logger.info("\n按类别统计：")
     for row in category_rows:
-        print(
+        logger.info(
             f"- {row['category']}：{row['total_amount']:.2f} 元，"
             f"{row['expense_count']} 笔"
         )
-    print("\n按月统计：")
+    logger.info("\n按月统计：")
     for row in monthly_rows:
-        print(
+        logger.info(
             f"- {row['expense_month']}：{row['total_amount']:.2f} 元，"
             f"{row['expense_count']} 笔"
         )
-    print(f"\n统计结果已保存：{STATISTICS_JSON_FILE}")
+    logger.info(f"\n统计结果已保存：{STATISTICS_JSON_FILE}")
     return statistics
 
 
 if __name__ == "__main__":
+    from logging_setup import configure_logging
+
+    configure_logging()
     generate_statistics()

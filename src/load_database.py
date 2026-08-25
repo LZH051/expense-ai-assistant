@@ -1,8 +1,11 @@
+import logging
 import csv
 
 from db import connect_to_database
 from init_database import initialize_database
 from paths import CLEAN_DATA_FILE
+
+logger = logging.getLogger(__name__)
 
 
 BUDGETS = [
@@ -81,10 +84,13 @@ def load_database() -> tuple[int, int]:
 
     inserted_count = after_count - before_count
     skipped_count = len(rows) - inserted_count
-    print(f"新增消费记录：{inserted_count}")
-    print(f"跳过已存在记录：{skipped_count}")
+    logger.info(f"新增消费记录：{inserted_count}")
+    logger.info(f"跳过已存在记录：{skipped_count}")
     return inserted_count, skipped_count
 
 
 if __name__ == "__main__":
+    from logging_setup import configure_logging
+
+    configure_logging()
     load_database()

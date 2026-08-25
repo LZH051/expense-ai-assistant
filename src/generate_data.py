@@ -1,9 +1,12 @@
+import logging
 import csv
 import random
 from datetime import date, timedelta
 from decimal import Decimal
 
 from paths import RAW_DATA_FILE, ensure_directories
+
+logger = logging.getLogger(__name__)
 
 
 FIELDNAMES = [
@@ -135,11 +138,14 @@ def generate_data() -> list[dict[str, str]]:
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"模拟数据生成成功：{RAW_DATA_FILE}")
-    print(f"共生成 {len(rows)} 条记录，其中包含重复、缺失和格式异常数据。")
+    logger.info(f"模拟数据生成成功：{RAW_DATA_FILE}")
+    logger.info(f"共生成 {len(rows)} 条记录，其中包含重复、缺失和格式异常数据。")
     return rows
 
 
 if __name__ == "__main__":
+    from logging_setup import configure_logging
+
+    configure_logging()
     generate_data()
 

@@ -1,4 +1,6 @@
+import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -13,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
+from logging_setup import configure_logging
 from web_database import Base, SessionLocal, engine
 from web_models import WebBudget, WebExpense, WebUser
 from web_security import (
@@ -54,6 +57,9 @@ async def lifespan(_app: FastAPI):
     yield
 
 
+configure_logging()
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="安心账本", lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
@@ -64,6 +70,25 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    started_at = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("%s %s 未捕获异常", request.method, request.url.path)
+        raise
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    logger.info(
+        "%s %s %s %.0fms",
+        request.method,
+        request.url.path,
+        response.status_code,
+        elapsed_ms,
+    )
+    return response
 
 
 @app.middleware("http")
