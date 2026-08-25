@@ -88,14 +88,9 @@ def clean_expense_data() -> list[dict[str, str]]:
         row["amount"] = amount
         row["expense_date"] = expense_date
 
-        duplicate_key = (
-            row["user_id"],
-            row["expense_date"],
-            row["category"],
-            row["amount"],
-            row["merchant"],
-            row["description"],
-        )
+        # 幂等去重：record_id 是业务主键（数据库层 source_record_id 也以它唯一），
+        # 只有同一条记录被重复导入才算重复；字段全同但 record_id 不同是两笔真实消费
+        duplicate_key = (row["record_id"],)
         if duplicate_key in seen_keys:
             report["removed_duplicate"] += 1
             continue
