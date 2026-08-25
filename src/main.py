@@ -5,7 +5,7 @@ from etl import clean_expense_data
 from generate_data import generate_data
 from interactive import run_interactive
 from load_database import load_database
-from statistics import generate_statistics
+from expense_statistics import generate_statistics
 
 
 def parse_args() -> argparse.Namespace:
