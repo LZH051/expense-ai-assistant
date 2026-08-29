@@ -1,24 +1,38 @@
 import logging
 import os
-import re
 import time
 from contextlib import asynccontextmanager
 from datetime import date
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from logging_setup import configure_logging
+from web_api import router as api_router
 from web_database import Base, SessionLocal, engine, is_production
 from web_models import WebBudget, WebExpense, WebUser
+from web_services import (
+    BUDGET_CATEGORIES,
+    EXPENSE_CATEGORIES,
+    budget_status,
+    category_summary,
+    get_owned_expense,
+    load_user,
+    parse_amount,
+    parse_expense_date,
+    query_expenses_page,
+    validate_expense_fields,
+)
 from web_security import (
     get_csrf_token,
     hash_password,
@@ -33,11 +47,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 STATIC_DIR = PROJECT_ROOT / "static"
 SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
-EXPENSE_CATEGORIES = (
-    "餐饮", "交通", "购物", "居住", "娱乐",
-    "医疗", "教育", "旅行", "其他",
-)
-BUDGET_CATEGORIES = ("全部类别", *EXPENSE_CATEGORIES)
 
 # 守卫按"是否线上"判断而不是"是否 Vercel"：换 Docker/VPS 部署时
 # 同样不允许启用仓库里公开的开发密钥
@@ -115,10 +124,7 @@ def add_message(request: Request, text: str, kind: str = "success") -> None:
 
 
 def current_user(request: Request, database: Session) -> WebUser | None:
-    user_id = request.session.get("user_id")
-    if not isinstance(user_id, int):
-        return None
-    return database.get(WebUser, user_id)
+    return load_user(database, request.session)
 
 
 def render(
@@ -156,44 +162,71 @@ def require_csrf(request: Request, submitted_token: str) -> None:
         raise HTTPException(status_code=400, detail="请求已失效，请刷新页面后重试。")
 
 
-AMOUNT_PATTERN = re.compile(r"\d+(\.\d{1,2})?")
+API_ERROR_CODES = {
+    400: "bad_request", 401: "unauthorized", 403: "forbidden",
+    404: "not_found", 405: "method_not_allowed", 409: "conflict",
+    422: "validation_error", 429: "too_many_requests",
+    500: "internal_error", 503: "service_unavailable",
+}
 
 
-def parse_amount(value: str) -> Decimal:
-    cleaned = value.strip()
-    # 先做字面校验：Decimal() 还"认识" nan/inf/1e5/1_0 这类写法，
-    # 其中 NaN 能通过 quantize，但一参与比较就抛 InvalidOperation
-    if not AMOUNT_PATTERN.fullmatch(cleaned):
-        raise ValueError("请输入有效金额：数字，最多两位小数。")
-    try:
-        amount = Decimal(cleaned).quantize(Decimal("0.01"))
-        if amount > Decimal("9999999999.99"):
-            raise ValueError
-    except (InvalidOperation, ValueError):
-        raise ValueError("金额必须在 0 至 9999999999.99 之间。") from None
-    return amount
+def api_error(status_code: int, message: str, details=None) -> JSONResponse:
+    body = {
+        "error": {
+            "code": API_ERROR_CODES.get(status_code, "error"),
+            "message": message,
+        }
+    }
+    if details:
+        body["error"]["details"] = details
+    return JSONResponse(body, status_code=status_code)
 
 
-def parse_expense_date(value: str) -> date:
-    try:
-        parsed = date.fromisoformat(value.strip())
-    except ValueError:
-        raise ValueError("请输入有效日期。") from None
-    return parsed
+@app.exception_handler(StarletteHTTPException)
+def handle_http_exception(request: Request, error: StarletteHTTPException):
+    # API 走统一 JSON 错误封装；页面 404 渲染友好页面
+    if request.url.path.startswith("/api/"):
+        return api_error(error.status_code, str(error.detail))
+    if error.status_code == 404:
+        with SessionLocal() as database:
+            user = current_user(request, database)
+            return render(
+                request, "404.html", user=user, status_code=404,
+                consume_messages=False,
+            )
+    return JSONResponse(
+        {"detail": str(error.detail)}, status_code=error.status_code
+    )
 
 
-def validate_expense_fields(category: str, merchant: str, description: str) -> None:
-    if category.strip() not in EXPENSE_CATEGORIES:
-        raise ValueError("请选择有效的消费类别。")
-    if len(merchant.strip()) > 120:
-        raise ValueError("商户名称不能超过120个字符。")
-    if len(description.strip()) > 1000:
-        raise ValueError("说明不能超过1000个字符。")
+@app.exception_handler(RequestValidationError)
+async def handle_validation_error(request: Request, error: RequestValidationError):
+    if request.url.path.startswith("/api/"):
+        details = [
+            {
+                "field": ".".join(
+                    str(part) for part in item.get("loc", []) if part != "body"
+                ),
+                "message": item.get("msg", ""),
+            }
+            for item in error.errors()
+        ]
+        message = details[0]["message"] if details else "请求参数不合法。"
+        return api_error(422, message, details=details)
+    return await request_validation_exception_handler(request, error)
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health():
+    try:
+        with SessionLocal() as database:
+            database.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("健康检查：数据库探测失败")
+        return JSONResponse(
+            {"status": "degraded", "database": "error"}, status_code=503
+        )
+    return {"status": "ok", "database": "ok"}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -310,98 +343,32 @@ def dashboard(request: Request):
             return redirect("/login")
 
         today = date.today()
-        month_key = today.strftime("%Y-%m")
-        # 用日期区间而不是 strftime/to_char 包住列：能吃到索引，
-        # 也不再需要按数据库方言写两套 SQL
-        month_start = today.replace(day=1)
-        next_month_start = (
-            date(today.year + 1, 1, 1)
-            if today.month == 12
-            else date(today.year, today.month + 1, 1)
-        )
-        in_current_month = (
-            WebExpense.expense_date >= month_start,
-            WebExpense.expense_date < next_month_start,
-        )
         total = database.scalar(
             select(func.coalesce(func.sum(WebExpense.amount), 0)).where(
                 WebExpense.user_id == user.id
             )
         )
-        month_total = database.scalar(
-            select(func.coalesce(func.sum(WebExpense.amount), 0)).where(
-                WebExpense.user_id == user.id, *in_current_month
-            )
-        )
         count = database.scalar(
             select(func.count(WebExpense.id)).where(WebExpense.user_id == user.id)
         )
-        category_rows = database.execute(
-            select(WebExpense.category, func.sum(WebExpense.amount).label("total"))
-            .where(WebExpense.user_id == user.id)
-            .group_by(WebExpense.category)
-            .order_by(func.sum(WebExpense.amount).desc())
-            .limit(6)
-        ).all()
+        category_rows = category_summary(database, user.id, limit=6)
         recent = database.scalars(
             select(WebExpense)
             .where(WebExpense.user_id == user.id)
             .order_by(WebExpense.expense_date.desc(), WebExpense.id.desc())
             .limit(8)
         ).all()
-
-        # 预算对账：总预算与分类预算是两种承诺，必须分开算。
-        # - "全部类别"预算存在时才有"总超支"这一说（0 也是合法承诺）；
-        # - 分类预算逐类别与该类别当月实际支出对账；
-        # - 没有总预算时，分类预算之和只作参考展示，不触发总告警。
-        month_budgets = database.scalars(
-            select(WebBudget).where(
-                WebBudget.user_id == user.id,
-                WebBudget.budget_month == month_key,
-            )
-        ).all()
-        overall_budget = next(
-            (b.amount for b in month_budgets if b.category == "全部类别"), None
-        )
-        has_overall_budget = overall_budget is not None
-        category_budgets = [
-            b for b in month_budgets if b.category != "全部类别"
-        ]
-        spent_rows = database.execute(
-            select(WebExpense.category, func.sum(WebExpense.amount))
-            .where(WebExpense.user_id == user.id, *in_current_month)
-            .group_by(WebExpense.category)
-        ).all()
-        spent_by_category = {
-            row[0]: Decimal(str(row[1])) for row in spent_rows
-        }
-        category_overruns = []
-        for budget in category_budgets:
-            spent = spent_by_category.get(budget.category, Decimal("0"))
-            if spent > budget.amount:
-                category_overruns.append({
-                    "category": budget.category,
-                    "over": spent - Decimal(str(budget.amount)),
-                })
-
-        month_total = Decimal(str(month_total or 0))
-        if has_overall_budget:
-            budget_total = Decimal(str(overall_budget))
-        else:
-            budget_total = sum(
-                (Decimal(str(b.amount)) for b in category_budgets),
-                Decimal("0"),
-            )
-        budget_remaining = budget_total - month_total
-        budget_exceeded = has_overall_budget and month_total > budget_total
+        budgets = budget_status(database, user.id, today)
         return render(
             request, "dashboard.html", user=user, total=total,
-            month_total=month_total, expense_count=count, recent=recent,
-            category_rows=category_rows, month_key=month_key,
-            budget_total=budget_total, budget_remaining=budget_remaining,
-            budget_exceeded=budget_exceeded,
-            has_overall_budget=has_overall_budget,
-            category_overruns=category_overruns,
+            month_total=budgets["month_total"], expense_count=count,
+            recent=recent, category_rows=category_rows,
+            month_key=budgets["month_key"],
+            budget_total=budgets["budget_total"],
+            budget_remaining=budgets["budget_remaining"],
+            budget_exceeded=budgets["budget_exceeded"],
+            has_overall_budget=budgets["has_overall_budget"],
+            category_overruns=budgets["category_overruns"],
         )
 
 
@@ -411,6 +378,7 @@ def expenses_page(
     category: str = "",
     start_date: str = "",
     end_date: str = "",
+    page: int = 1,
 ):
     with SessionLocal() as database:
         user = current_user(request, database)
@@ -438,18 +406,28 @@ def expenses_page(
             add_message(request, str(error), "error")
             return redirect("/expenses")
 
-        query = select(WebExpense).where(WebExpense.user_id == user.id)
-        if selected_category:
-            query = query.where(WebExpense.category == selected_category)
-        if parsed_start_date is not None:
-            query = query.where(WebExpense.expense_date >= parsed_start_date)
-        if parsed_end_date is not None:
-            query = query.where(WebExpense.expense_date <= parsed_end_date)
-        expenses = database.scalars(
-            query.order_by(WebExpense.expense_date.desc(), WebExpense.id.desc())
-        ).all()
+        result = query_expenses_page(
+            database, user.id,
+            category=selected_category,
+            start=parsed_start_date, end=parsed_end_date,
+            page=page,
+        )
+        filter_query = "&".join(
+            f"{key}={value}"
+            for key, value in (
+                ("category", selected_category),
+                ("start_date", selected_start_date),
+                ("end_date", selected_end_date),
+            )
+            if value
+        )
         return render(
-            request, "expenses.html", user=user, expenses=expenses,
+            request, "expenses.html", user=user,
+            expenses=result["items"],
+            total_count=result["total"],
+            total_amount=result["total_amount"],
+            page=result["page"], pages=result["pages"],
+            filter_query=filter_query,
             categories=EXPENSE_CATEGORIES,
             selected_category=selected_category,
             selected_start_date=selected_start_date,
@@ -779,14 +757,7 @@ def delete_account(
     return redirect("/")
 
 
-@app.exception_handler(404)
-def not_found(request: Request, _error: HTTPException):
-    with SessionLocal() as database:
-        user = current_user(request, database)
-        return render(
-            request, "404.html", user=user, status_code=404,
-            consume_messages=False,
-        )
+app.include_router(api_router)
 
 
 if __name__ == "__main__":
