@@ -47,7 +47,7 @@ def run_clean(rows: list[dict[str, str]], workdir: Path) -> tuple[list[dict[str,
     return cleaned, report
 
 
-def main() -> None:
+def test_etl_dedup_by_record_id() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         workdir = Path(tmp)
 
@@ -73,4 +73,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    test_etl_dedup_by_record_id()

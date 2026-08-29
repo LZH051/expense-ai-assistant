@@ -159,28 +159,15 @@ E:\expense-ai-assistant-sqlite\database\web_expense.db
 
 ## 测试
 
-核心网页流程测试：
+安装开发依赖后，一条命令运行全部测试（pytest 会自动收集 `tests/` 下所有用例）：
 
 ```powershell
-.\.venv\Scripts\python.exe tests\web_smoke_test.py
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-其他测试：
-
-```powershell
-.\.venv\Scripts\python.exe tests\filter_categories_test.py
-.\.venv\Scripts\python.exe tests\date_filter_test.py
-.\.venv\Scripts\python.exe tests\overall_budget_test.py
-.\.venv\Scripts\python.exe tests\budget_warning_test.py
-.\.venv\Scripts\python.exe tests\etl_dedup_test.py
-.\.venv\Scripts\python.exe tests\stdlib_shadow_test.py
-.\.venv\Scripts\python.exe tests\logging_setup_test.py
-.\.venv\Scripts\python.exe tests\ai_robustness_test.py
-.\.venv\Scripts\python.exe tests\p0_web_fixes_test.py
-.\.venv\Scripts\python.exe tests\api_v1_test.py
-.\.venv\Scripts\python.exe tests\security_hardening_test.py
-.\.venv\Scripts\python.exe tests\insights_test.py
-```
+测试的临时数据库与登录态由 `tests/conftest.py` 统一提供，每个用例独享干净数据库。
+推送到 GitHub 后，`.github/workflows/tests.yml` 会自动运行同样的测试。
 
 ## Vercel 部署
 

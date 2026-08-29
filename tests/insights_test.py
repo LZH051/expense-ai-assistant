@@ -56,7 +56,9 @@ class StubClient:
         )
 
 
-def main() -> None:
+def test_insights_end_to_end(monkeypatch) -> None:
+    for key in ("AI_API_KEY", "AI_BASE_URL", "AI_MODEL"):
+        monkeypatch.delenv(key, raising=False)
     with TestClient(app) as client:
         page = client.get("/register")
         client.post(
@@ -133,4 +135,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    test_insights_end_to_end()

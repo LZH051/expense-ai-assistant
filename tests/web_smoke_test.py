@@ -47,7 +47,7 @@ def register(client: TestClient, username: str, email: str) -> None:
     assert response.headers["location"] == "/dashboard"
 
 
-def main() -> None:
+def test_web_smoke_flow() -> None:
     with TestClient(app) as first_client, TestClient(app) as second_client:
         register(first_client, "Alice", "alice@example.com")
 
@@ -153,4 +153,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    test_web_smoke_flow()

@@ -80,7 +80,8 @@ def set_budget(client: TestClient, category: str, amount: str) -> None:
     assert response.status_code == 303
 
 
-def test_nan_amount_rejected(client: TestClient) -> None:
+def test_nan_amount_rejected(user_client) -> None:
+    client = user_client
     page = client.get("/expenses/new")
     for bad in ("nan", "NaN", "-nan", "inf", "1e5", "1_0"):
         response = client.post(
@@ -100,7 +101,8 @@ def test_nan_amount_rejected(client: TestClient) -> None:
         assert "有效金额" in response.text
 
 
-def test_budget_semantics(client: TestClient) -> None:
+def test_budget_semantics(user_client) -> None:
+    client = user_client
     # 场景1：只有分类预算（餐饮300），其他类别消费300 → 不得误报总预算超支
     set_budget(client, "餐饮", "300.00")
     add_expense(client, "餐饮", "200.00")
@@ -126,7 +128,8 @@ def test_budget_semantics(client: TestClient) -> None:
     )
 
 
-def test_flash_survives_404(client: TestClient) -> None:
+def test_flash_survives_404(user_client) -> None:
+    client = user_client
     add_expense(client, "购物", "10.00")   # 设置 flash 后跳转
     missing = client.get("/favicon.ico")   # 浏览器自动请求，命中 404 页
     assert missing.status_code == 404
@@ -136,16 +139,3 @@ def test_flash_survives_404(client: TestClient) -> None:
     )
 
 
-def main() -> None:
-    with TestClient(app) as client:
-        register(client, "p0-fixes@example.com")
-        test_nan_amount_rejected(client)
-        test_budget_semantics(client)
-    with TestClient(app) as client:
-        register(client, "p0-flash@example.com")
-        test_flash_survives_404(client)
-    print("P0_WEB_FIXES_TEST=PASS")
-
-
-if __name__ == "__main__":
-    main()

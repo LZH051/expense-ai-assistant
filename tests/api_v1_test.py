@@ -42,7 +42,7 @@ def register(client: TestClient, email: str) -> None:
     assert response.status_code == 200
 
 
-def main() -> None:
+def test_api_v1_endpoints() -> None:
     # 未登录：统一 401 错误封装
     with TestClient(app) as anon:
         response = anon.get("/api/v1/statistics")
@@ -138,4 +138,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    test_api_v1_endpoints()

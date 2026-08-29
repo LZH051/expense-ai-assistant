@@ -69,10 +69,12 @@ def setup_files(workdir: Path) -> None:
     ai_analysis.AI_USAGE_FILE = workdir / "ai_usage.jsonl"
 
 
-def main() -> None:
-    os.environ.update(
-        AI_API_KEY="test-key", AI_BASE_URL="https://example.com", AI_MODEL="m"
-    )
+def test_ai_robustness(monkeypatch) -> None:
+    # 用 monkeypatch 而不是 os.environ.update：测试结束自动还原，
+    # 不会污染同一进程里的其他测试（insights 测试假设 AI 未配置）
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.com")
+    monkeypatch.setenv("AI_MODEL", "m")
 
     # 场景1：失败两次后成功 → 重试生效 + usage 落盘
     with tempfile.TemporaryDirectory() as tmp:
@@ -118,5 +120,4 @@ def main() -> None:
     print("AI_ROBUSTNESS_TEST=PASS")
 
 
-if __name__ == "__main__":
-    main()
+

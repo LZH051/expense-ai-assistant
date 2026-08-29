@@ -13,7 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 
 
-def main() -> None:
+def test_no_stdlib_shadowing() -> None:
     # 在"src/ 排在 sys.path 首位"的运行环境里检查 statistics 的来源
     code = (
         "import sys; sys.path.insert(0, r'%s')\n"
@@ -34,4 +34,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    test_no_stdlib_shadowing()
