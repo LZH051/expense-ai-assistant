@@ -760,6 +760,53 @@ def delete_budget(request: Request, budget_id: int, csrf_token: str = Form(...))
     return redirect("/budgets")
 
 
+@app.get("/insights", response_class=HTMLResponse)
+def insights_page(request: Request):
+    with SessionLocal() as database:
+        user = current_user(request, database)
+        if user is None:
+            return require_login(request)
+        import web_insights
+
+        return render(
+            request, "insights.html", user=user,
+            ai_ready=web_insights.ai_configured(),
+            analyses=web_insights.list_insights(database, user.id),
+        )
+
+
+@app.post("/insights/generate")
+def generate_insight_route(
+    request: Request,
+    csrf_token: str = Form(...),
+    confirm_paid: str = Form(""),
+):
+    require_csrf(request, csrf_token)
+    with SessionLocal() as database:
+        user = current_user(request, database)
+        if user is None:
+            return require_login(request)
+        if not confirm_paid:
+            add_message(request, "请先勾选费用确认。", "error")
+            return redirect("/insights")
+        import web_insights
+
+        if not web_insights.ai_configured():
+            add_message(request, "尚未配置 AI 接口，无法生成分析。", "error")
+            return redirect("/insights")
+        try:
+            web_insights.generate_insight(database, user)
+        except Exception:
+            logger.exception("AI 分析生成失败 user=%s", user.id)
+            add_message(
+                request, "AI 分析生成失败，请稍后再试；本次未保存结果。",
+                "error",
+            )
+            return redirect("/insights")
+        add_message(request, "本月 AI 分析已生成。")
+    return redirect("/insights")
+
+
 @app.get("/account", response_class=HTMLResponse)
 def account_page(request: Request):
     with SessionLocal() as database:

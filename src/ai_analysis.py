@@ -95,9 +95,13 @@ def record_usage(model: str, usage: object) -> None:
         "completion_tokens": getattr(usage, "completion_tokens", None),
         "total_tokens": getattr(usage, "total_tokens", None),
     }
-    AI_USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with AI_USAGE_FILE.open("a", encoding="utf-8") as file:
-        file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    try:
+        AI_USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with AI_USAGE_FILE.open("a", encoding="utf-8") as file:
+            file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        # 只读文件系统（如 Vercel）：放弃落盘，用量仍进日志
+        logger.warning("用量文件不可写，仅记录到日志：%s", AI_USAGE_FILE)
     logger.info(
         "本次 AI 调用消耗 token：输入 %s / 输出 %s / 合计 %s",
         entry["prompt_tokens"], entry["completion_tokens"], entry["total_tokens"],
