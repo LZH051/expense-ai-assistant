@@ -28,7 +28,7 @@
         <div><h2>删除账户</h2><p>删除后，你的消费和预算将一起永久删除，无法恢复。</p></div>
         <form class="danger-form" method="post" action="/account/delete" data-confirm="这是永久操作。确定删除整个账户及全部数据吗？">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <label>输入 DELETE 确认<input name="confirmation" required autocomplete="off"></label>
+            <label>输入 DELETE 确认<input name="confirmation" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="DELETE"></label>
             <label>输入当前密码<input type="password" name="password" required autocomplete="current-password"></label>
             <button class="button button-danger" type="submit">永久删除账户</button>
         </form>

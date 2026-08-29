@@ -2,7 +2,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -33,6 +33,7 @@ from web_services import (
     category_summary,
     get_owned_expense,
     load_user,
+    monthly_summary,
     parse_amount,
     parse_expense_date,
     query_expenses_page,
@@ -116,8 +117,11 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # style-src 需放行内联样式：模板里的条形图/进度条宽度和
+    # Chart.js 都依赖 style 属性；script-src 保持严格 'self'
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; script-src 'self'; style-src 'self'; "
+        "default-src 'self'; script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; "
         "form-action 'self'"
     )
@@ -420,10 +424,19 @@ def dashboard(request: Request):
             .limit(8)
         ).all()
         budgets = budget_status(database, user.id, today)
+        category_chart = [
+            {"label": row.category, "value": float(row.total)}
+            for row in category_rows
+        ]
+        monthly_chart = [
+            {"month": row["month"], "value": float(row["total"])}
+            for row in monthly_summary(database, user.id)
+        ]
         return render(
             request, "dashboard.html", user=user, total=total,
             month_total=budgets["month_total"], expense_count=count,
             recent=recent, category_rows=category_rows,
+            category_chart=category_chart, monthly_chart=monthly_chart,
             month_key=budgets["month_key"],
             budget_total=budgets["budget_total"],
             budget_remaining=budgets["budget_remaining"],
@@ -482,8 +495,11 @@ def expenses_page(
             )
             if value
         )
+        today = date.today()
         return render(
             request, "expenses.html", user=user,
+            month_start=today.replace(day=1).isoformat(),
+            days30_start=(today - timedelta(days=29)).isoformat(),
             expenses=result["items"],
             total_count=result["total"],
             total_amount=result["total_amount"],
@@ -505,6 +521,7 @@ def new_expense_page(request: Request):
         return render(
             request, "expense_form.html", user=user, expense=None,
             form={"expense_date": date.today().isoformat()},
+            categories=EXPENSE_CATEGORIES,
         )
 
 
@@ -536,6 +553,7 @@ def create_expense(
             return render(
                 request, "expense_form.html", user=user, expense=None,
                 form=form, errors=[str(error)], status_code=422,
+                categories=EXPENSE_CATEGORIES,
             )
         database.add(
             WebExpense(
@@ -565,6 +583,7 @@ def edit_expense_page(request: Request, expense_id: int):
             raise HTTPException(status_code=404, detail="消费记录不存在。")
         return render(
             request, "expense_form.html", user=user, expense=expense, form={},
+            categories=EXPENSE_CATEGORIES,
         )
 
 
@@ -604,6 +623,7 @@ def update_expense_route(
             return render(
                 request, "expense_form.html", user=user, expense=expense,
                 form=form, errors=[str(error)], status_code=422,
+                categories=EXPENSE_CATEGORIES,
             )
         expense.expense_date = parsed_date
         expense.category = category.strip()
@@ -645,10 +665,17 @@ def budgets_page(request: Request):
             select(WebBudget).where(WebBudget.user_id == user.id)
             .order_by(WebBudget.budget_month.desc(), WebBudget.category)
         ).all()
+        status = budget_status(database, user.id, date.today())
+        spent_map = {
+            item["category"]: item["spent"]
+            for item in status["category_statuses"]
+        }
+        spent_map["全部类别"] = status["month_total"]
         return render(
             request, "budgets.html", user=user, budgets=budgets,
-            current_month=date.today().strftime("%Y-%m"),
+            current_month=status["month_key"],
             categories=BUDGET_CATEGORIES,
+            spent_map=spent_map,
         )
 
 

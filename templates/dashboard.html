@@ -49,7 +49,7 @@
             <div class="recent-list">
                 {% for expense in recent %}
                 <a href="/expenses/{{ expense.id }}/edit">
-                    <span class="category-badge">{{ expense.category[0] }}</span>
+                    <span class="category-badge" aria-hidden="true">{{ expense.category[0] }}</span>
                     <span><b>{{ expense.category }}</b><small>{{ expense.expense_date }} · {{ expense.merchant or '未填写商家或地点' }}</small></span>
                     <strong>− ¥ {{ '%.2f'|format(expense.amount) }}</strong>
                 </a>
@@ -58,5 +58,24 @@
             {% else %}<div class="empty-state"><b>还没有消费记录</b><p>点击“记一笔”开始使用。</p></div>{% endif %}
         </section>
     </div>
+
+    {% if category_chart or monthly_chart %}
+    <section class="panel chart-panel">
+        <div class="panel-heading"><div><h2>支出趋势与构成</h2><p>近 12 个月走势与分类占比</p></div></div>
+        <div class="charts-grid">
+            <div class="chart-box"><canvas id="trend-chart" role="img" aria-label="近12个月支出趋势折线图"></canvas></div>
+            <div class="chart-box"><canvas id="category-chart" role="img" aria-label="分类支出占比环形图"></canvas></div>
+        </div>
+        <noscript><p class="muted">启用 JavaScript 后可查看图表；上方"类别排行"提供相同数据。</p></noscript>
+    </section>
+    {% endif %}
 </section>
+{% endblock %}
+
+{% block scripts %}
+{% if category_chart or monthly_chart %}
+<script id="chart-data" type="application/json">{{ {"categories": category_chart, "monthly": monthly_chart} | tojson }}</script>
+<script src="{{ request.url_for('static', path='vendor/chart.umd.min.js') }}?v=4.4.9"></script>
+<script src="{{ request.url_for('static', path='charts.js') }}?v=20260829-1"></script>
+{% endif %}
 {% endblock %}
