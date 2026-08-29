@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from datetime import date
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from logging_setup import configure_logging
-from web_database import Base, SessionLocal, engine
+from web_database import Base, SessionLocal, engine, is_production
 from web_models import WebBudget, WebExpense, WebUser
 from web_security import (
     get_csrf_token,
@@ -38,7 +39,9 @@ EXPENSE_CATEGORIES = (
 )
 BUDGET_CATEGORIES = ("全部类别", *EXPENSE_CATEGORIES)
 
-if os.getenv("VERCEL") and not SESSION_SECRET:
+# 守卫按"是否线上"判断而不是"是否 Vercel"：换 Docker/VPS 部署时
+# 同样不允许启用仓库里公开的开发密钥
+if is_production() and not SESSION_SECRET:
     raise RuntimeError("线上部署必须配置 SESSION_SECRET 环境变量。")
 if not SESSION_SECRET:
     SESSION_SECRET = "local-development-only-change-before-deployment"
@@ -65,7 +68,7 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
     same_site="lax",
-    https_only=bool(os.getenv("VERCEL")),
+    https_only=is_production(),
     max_age=60 * 60 * 24 * 14,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -124,9 +127,15 @@ def render(
     *,
     user: WebUser | None = None,
     status_code: int = 200,
+    consume_messages: bool = True,
     **context,
 ) -> HTMLResponse:
-    messages = request.session.pop("messages", [])
+    # 404 等"用户不一定看到"的页面不消费 flash（浏览器自动请求
+    # /favicon.ico 也会走 404 处理器，不能把排队的提示吞掉）
+    if consume_messages:
+        messages = request.session.pop("messages", [])
+    else:
+        messages = request.session.get("messages", [])
     values = {
         "request": request,
         "current_user": user,
@@ -147,13 +156,21 @@ def require_csrf(request: Request, submitted_token: str) -> None:
         raise HTTPException(status_code=400, detail="请求已失效，请刷新页面后重试。")
 
 
+AMOUNT_PATTERN = re.compile(r"\d+(\.\d{1,2})?")
+
+
 def parse_amount(value: str) -> Decimal:
+    cleaned = value.strip()
+    # 先做字面校验：Decimal() 还"认识" nan/inf/1e5/1_0 这类写法，
+    # 其中 NaN 能通过 quantize，但一参与比较就抛 InvalidOperation
+    if not AMOUNT_PATTERN.fullmatch(cleaned):
+        raise ValueError("请输入有效金额：数字，最多两位小数。")
     try:
-        amount = Decimal(value.strip()).quantize(Decimal("0.01"))
+        amount = Decimal(cleaned).quantize(Decimal("0.01"))
+        if amount > Decimal("9999999999.99"):
+            raise ValueError
     except (InvalidOperation, ValueError):
-        raise ValueError("请输入有效金额。") from None
-    if amount < 0 or amount > Decimal("9999999999.99"):
-        raise ValueError("金额必须在 0 至 9999999999.99 之间。")
+        raise ValueError("金额必须在 0 至 9999999999.99 之间。") from None
     return amount
 
 
@@ -294,6 +311,18 @@ def dashboard(request: Request):
 
         today = date.today()
         month_key = today.strftime("%Y-%m")
+        # 用日期区间而不是 strftime/to_char 包住列：能吃到索引，
+        # 也不再需要按数据库方言写两套 SQL
+        month_start = today.replace(day=1)
+        next_month_start = (
+            date(today.year + 1, 1, 1)
+            if today.month == 12
+            else date(today.year, today.month + 1, 1)
+        )
+        in_current_month = (
+            WebExpense.expense_date >= month_start,
+            WebExpense.expense_date < next_month_start,
+        )
         total = database.scalar(
             select(func.coalesce(func.sum(WebExpense.amount), 0)).where(
                 WebExpense.user_id == user.id
@@ -301,10 +330,7 @@ def dashboard(request: Request):
         )
         month_total = database.scalar(
             select(func.coalesce(func.sum(WebExpense.amount), 0)).where(
-                WebExpense.user_id == user.id,
-                func.strftime("%Y-%m", WebExpense.expense_date) == month_key
-                if engine.dialect.name == "sqlite"
-                else func.to_char(WebExpense.expense_date, "YYYY-MM") == month_key,
+                WebExpense.user_id == user.id, *in_current_month
             )
         )
         count = database.scalar(
@@ -323,32 +349,59 @@ def dashboard(request: Request):
             .order_by(WebExpense.expense_date.desc(), WebExpense.id.desc())
             .limit(8)
         ).all()
-        overall_budget = database.scalar(
-            select(WebBudget.amount).where(
+
+        # 预算对账：总预算与分类预算是两种承诺，必须分开算。
+        # - "全部类别"预算存在时才有"总超支"这一说（0 也是合法承诺）；
+        # - 分类预算逐类别与该类别当月实际支出对账；
+        # - 没有总预算时，分类预算之和只作参考展示，不触发总告警。
+        month_budgets = database.scalars(
+            select(WebBudget).where(
                 WebBudget.user_id == user.id,
                 WebBudget.budget_month == month_key,
-                WebBudget.category == "全部类别",
             )
+        ).all()
+        overall_budget = next(
+            (b.amount for b in month_budgets if b.category == "全部类别"), None
         )
-        if overall_budget is not None:
-            budget_total = overall_budget
-        else:
-            budget_total = database.scalar(
-                select(func.coalesce(func.sum(WebBudget.amount), 0)).where(
-                    WebBudget.user_id == user.id,
-                    WebBudget.budget_month == month_key,
-                )
-            )
-        budget_total = Decimal(str(budget_total or 0))
+        has_overall_budget = overall_budget is not None
+        category_budgets = [
+            b for b in month_budgets if b.category != "全部类别"
+        ]
+        spent_rows = database.execute(
+            select(WebExpense.category, func.sum(WebExpense.amount))
+            .where(WebExpense.user_id == user.id, *in_current_month)
+            .group_by(WebExpense.category)
+        ).all()
+        spent_by_category = {
+            row[0]: Decimal(str(row[1])) for row in spent_rows
+        }
+        category_overruns = []
+        for budget in category_budgets:
+            spent = spent_by_category.get(budget.category, Decimal("0"))
+            if spent > budget.amount:
+                category_overruns.append({
+                    "category": budget.category,
+                    "over": spent - Decimal(str(budget.amount)),
+                })
+
         month_total = Decimal(str(month_total or 0))
+        if has_overall_budget:
+            budget_total = Decimal(str(overall_budget))
+        else:
+            budget_total = sum(
+                (Decimal(str(b.amount)) for b in category_budgets),
+                Decimal("0"),
+            )
         budget_remaining = budget_total - month_total
-        budget_exceeded = budget_total > 0 and budget_remaining < 0
+        budget_exceeded = has_overall_budget and month_total > budget_total
         return render(
             request, "dashboard.html", user=user, total=total,
             month_total=month_total, expense_count=count, recent=recent,
             category_rows=category_rows, month_key=month_key,
             budget_total=budget_total, budget_remaining=budget_remaining,
             budget_exceeded=budget_exceeded,
+            has_overall_budget=has_overall_budget,
+            category_overruns=category_overruns,
         )
 
 
@@ -591,6 +644,7 @@ def save_budget(
         if budget:
             budget.amount = parsed_amount
             message = "预算已更新。"
+            database.commit()
         else:
             database.add(
                 WebBudget(
@@ -599,7 +653,23 @@ def save_budget(
                 )
             )
             message = "预算已创建。"
-        database.commit()
+            try:
+                database.commit()
+            except IntegrityError:
+                # 表单重复提交/并发：另一请求刚插入同一条，改为更新
+                database.rollback()
+                existing = database.scalar(
+                    select(WebBudget).where(
+                        WebBudget.user_id == user.id,
+                        WebBudget.budget_month == budget_month,
+                        WebBudget.category == category.strip(),
+                    )
+                )
+                if existing is None:
+                    raise
+                existing.amount = parsed_amount
+                database.commit()
+                message = "预算已更新。"
         add_message(request, message)
     return redirect("/budgets")
 
@@ -713,7 +783,10 @@ def delete_account(
 def not_found(request: Request, _error: HTTPException):
     with SessionLocal() as database:
         user = current_user(request, database)
-        return render(request, "404.html", user=user, status_code=404)
+        return render(
+            request, "404.html", user=user, status_code=404,
+            consume_messages=False,
+        )
 
 
 if __name__ == "__main__":

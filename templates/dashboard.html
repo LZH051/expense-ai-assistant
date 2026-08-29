@@ -14,10 +14,17 @@
     </div>
     {% endif %}
 
+    {% if category_overruns %}
+    <div class="budget-alert" role="alert">
+        <strong>分类预算超支</strong>
+        <span>{% for item in category_overruns %}{{ item.category }} 超支 ¥ {{ '%.2f'|format(item.over) }}{% if not loop.last %}；{% endif %}{% endfor %}</span>
+    </div>
+    {% endif %}
+
     <div class="stat-grid">
         <article class="stat-card accent"><small>累计支出</small><strong>¥ {{ '%.2f'|format(total) }}</strong><span>全部消费记录</span></article>
         <article class="stat-card"><small>{{ month_key }} 支出</small><strong>¥ {{ '%.2f'|format(month_total) }}</strong><span>本月累计</span></article>
-        <article class="stat-card {% if budget_exceeded %}over-budget{% endif %}"><small>本月预算</small><strong>¥ {{ '%.2f'|format(budget_total) }}</strong><span>{% if budget_exceeded %}已超出 ¥ {{ '%.2f'|format(-budget_remaining) }}{% elif budget_total %}剩余 ¥ {{ '%.2f'|format(budget_remaining) }}{% else %}尚未设置{% endif %}</span></article>
+        <article class="stat-card {% if budget_exceeded %}over-budget{% endif %}"><small>本月预算{% if not has_overall_budget and budget_total %}（分类合计）{% endif %}</small><strong>¥ {{ '%.2f'|format(budget_total) }}</strong><span>{% if budget_exceeded %}已超出 ¥ {{ '%.2f'|format(-budget_remaining) }}{% elif budget_total %}剩余 ¥ {{ '%.2f'|format(budget_remaining) }}{% else %}尚未设置{% endif %}</span></article>
         <article class="stat-card"><small>消费笔数</small><strong>{{ expense_count }}</strong><span>已保存记录</span></article>
     </div>
 
@@ -29,7 +36,7 @@
                 {% for row in category_rows %}
                 <div class="bar-row">
                     <div><span>{{ row.category }}</span><b>¥ {{ '%.2f'|format(row.total) }}</b></div>
-                    <div class="bar-track"><span style="width: {{ ((row.total / category_rows[0].total) * 100)|round }}%"></span></div>
+                    <div class="bar-track"><span style="width: {{ ((row.total / category_rows[0].total * 100)|round) if category_rows[0].total else 0 }}%"></span></div>
                 </div>
                 {% endfor %}
             </div>
