@@ -27,6 +27,19 @@ class WebUser(Base):
     )
 
 
+class LoginAttempt(Base):
+    """登录失败记录，用于限流。存数据库而不是进程内存：
+    serverless 每个实例内存独立，进程内计数挡不住分布式撞库。"""
+
+    __tablename__ = "web_login_attempts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    attempted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class WebExpense(Base):
     __tablename__ = "web_expenses"
 

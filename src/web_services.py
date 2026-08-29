@@ -5,13 +5,13 @@
 """
 
 import re
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from web_models import WebBudget, WebExpense, WebUser
+from web_models import LoginAttempt, WebBudget, WebExpense, WebUser
 
 EXPENSE_CATEGORIES = (
     "餐饮", "交通", "购物", "居住", "娱乐",
@@ -40,12 +40,61 @@ def parse_amount(value: str) -> Decimal:
     return amount
 
 
+MIN_EXPENSE_DATE = date(2000, 1, 1)
+
+
+def ensure_expense_date_in_range(value: date) -> date:
+    # 上限留到明天：容忍用户与服务器之间的时区差
+    if not MIN_EXPENSE_DATE <= value <= date.today() + timedelta(days=1):
+        raise ValueError("日期需在 2000-01-01 与明天之间。")
+    return value
+
+
 def parse_expense_date(value: str) -> date:
     try:
         parsed = date.fromisoformat(value.strip())
     except ValueError:
         raise ValueError("请输入有效日期。") from None
-    return parsed
+    return ensure_expense_date_in_range(parsed)
+
+
+BUDGET_MONTH_PATTERN = re.compile(r"(20\d{2})-(0[1-9]|1[0-2])")
+
+
+def validate_budget_month(value: str) -> str:
+    value = value.strip()
+    # 显式正则校验，而不是拼 "-01" 交给 fromisoformat：
+    # 后者的报错是英文异常原文，且校验串与写库串不同源
+    if not BUDGET_MONTH_PATTERN.fullmatch(value):
+        raise ValueError("预算月份格式应为 YYYY-MM（2000-01 至 2099-12）。")
+    return value
+
+
+LOGIN_ATTEMPT_LIMIT = 5
+LOGIN_ATTEMPT_WINDOW = timedelta(minutes=15)
+
+
+def too_many_login_failures(database: Session, email: str) -> bool:
+    cutoff = datetime.now(timezone.utc) - LOGIN_ATTEMPT_WINDOW
+    count = database.scalar(
+        select(func.count(LoginAttempt.id)).where(
+            LoginAttempt.email == email,
+            LoginAttempt.attempted_at >= cutoff,
+        )
+    ) or 0
+    return count >= LOGIN_ATTEMPT_LIMIT
+
+
+def record_login_failure(database: Session, email: str) -> None:
+    database.add(
+        LoginAttempt(email=email, attempted_at=datetime.now(timezone.utc))
+    )
+    database.commit()
+
+
+def clear_login_failures(database: Session, email: str) -> None:
+    database.execute(delete(LoginAttempt).where(LoginAttempt.email == email))
+    database.commit()
 
 
 def validate_expense_fields(category: str, merchant: str, description: str) -> None:

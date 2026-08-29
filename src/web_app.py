@@ -4,6 +4,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -23,6 +24,10 @@ from web_database import Base, SessionLocal, engine, is_production
 from web_models import WebBudget, WebExpense, WebUser
 from web_services import (
     BUDGET_CATEGORIES,
+    clear_login_failures,
+    record_login_failure,
+    too_many_login_failures,
+    validate_budget_month,
     EXPENSE_CATEGORIES,
     budget_status,
     category_summary,
@@ -34,6 +39,7 @@ from web_services import (
     validate_expense_fields,
 )
 from web_security import (
+    DUMMY_PASSWORD_HASH,
     get_csrf_token,
     hash_password,
     is_valid_email,
@@ -110,6 +116,21 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self'; style-src 'self'; "
+        "img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; "
+        "form-action 'self'"
+    )
+    if is_production():
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=63072000; includeSubDomains"
+        )
+    # 含账目和 CSRF token 的页面禁止缓存：共享设备按"后退"不应看到
+    # 上一个用户的账单，边缘节点也不应缓存
+    if request.url.path.startswith(
+        ("/dashboard", "/expenses", "/budgets", "/account", "/insights")
+    ):
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 
@@ -157,9 +178,38 @@ def render(
     )
 
 
+class CsrfError(Exception):
+    pass
+
+
 def require_csrf(request: Request, submitted_token: str) -> None:
     if not valid_csrf_token(request.session, submitted_token):
-        raise HTTPException(status_code=400, detail="请求已失效，请刷新页面后重试。")
+        raise CsrfError
+
+
+def safe_referer_path(request: Request) -> str:
+    """只跳回同源路径，防止 Referer 被用作 open redirect。"""
+    referer = urlparse(request.headers.get("referer", ""))
+    if referer.netloc in ("", request.url.netloc) and referer.path.startswith("/"):
+        return referer.path
+    return "/"
+
+
+@app.exception_handler(CsrfError)
+def handle_csrf_error(request: Request, _error: CsrfError):
+    message = "请求已失效，请刷新页面后重试。"
+    if request.url.path.startswith("/api/"):
+        return api_error(400, message)
+    # 匿名会话本来就没有 CSRF token，真实原因是未登录
+    if not isinstance(request.session.get("user_id"), int):
+        return require_login(request)
+    add_message(request, message, "error")
+    return redirect(safe_referer_path(request))
+
+
+def require_login(request: Request) -> RedirectResponse:
+    add_message(request, "请先登录。", "error")
+    return redirect("/login")
 
 
 API_ERROR_CODES = {
@@ -314,13 +364,24 @@ def login(
     require_csrf(request, csrf_token)
     email = normalize_email(email)
     with SessionLocal() as database:
+        if too_many_login_failures(database, email):
+            return render(
+                request, "login.html",
+                errors=["尝试次数过多，请约 15 分钟后再试。"],
+                form={"email": email}, status_code=429,
+            )
         user = database.scalar(select(WebUser).where(WebUser.email == email))
-        if user is None or not verify_password(password, user.password_hash):
+        # 邮箱不存在时也执行一次哈希校验：让两条路径耗时一致，
+        # 否则响应时间差可用于枚举注册邮箱
+        stored_hash = user.password_hash if user else DUMMY_PASSWORD_HASH
+        if user is None or not verify_password(password, stored_hash):
+            record_login_failure(database, email)
             return render(
                 request, "login.html",
                 errors=["邮箱或密码不正确。"],
                 form={"email": email}, status_code=401,
             )
+        clear_login_failures(database, email)
         request.session.clear()
         request.session["user_id"] = user.id
         get_csrf_token(request.session)
@@ -340,7 +401,7 @@ def dashboard(request: Request):
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
 
         today = date.today()
         total = database.scalar(
@@ -383,7 +444,7 @@ def expenses_page(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
 
         selected_category = category.strip()
         selected_start_date = start_date.strip()
@@ -440,7 +501,7 @@ def new_expense_page(request: Request):
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         return render(
             request, "expense_form.html", user=user, expense=None,
             form={"expense_date": date.today().isoformat()},
@@ -461,7 +522,7 @@ def create_expense(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         form = {
             "expense_date": expense_date, "category": category,
             "amount": amount, "merchant": merchant,
@@ -494,7 +555,7 @@ def edit_expense_page(request: Request, expense_id: int):
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         expense = database.scalar(
             select(WebExpense).where(
                 WebExpense.id == expense_id, WebExpense.user_id == user.id
@@ -522,7 +583,7 @@ def update_expense_route(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         expense = database.scalar(
             select(WebExpense).where(
                 WebExpense.id == expense_id, WebExpense.user_id == user.id
@@ -560,7 +621,7 @@ def delete_expense(request: Request, expense_id: int, csrf_token: str = Form(...
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         expense = database.scalar(
             select(WebExpense).where(
                 WebExpense.id == expense_id, WebExpense.user_id == user.id
@@ -579,7 +640,7 @@ def budgets_page(request: Request):
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         budgets = database.scalars(
             select(WebBudget).where(WebBudget.user_id == user.id)
             .order_by(WebBudget.budget_month.desc(), WebBudget.category)
@@ -603,9 +664,9 @@ def save_budget(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         try:
-            date.fromisoformat(f"{budget_month}-01")
+            budget_month = validate_budget_month(budget_month)
             parsed_amount = parse_amount(amount)
             if category.strip() not in BUDGET_CATEGORIES:
                 raise ValueError("请选择有效的预算类别。")
@@ -658,7 +719,7 @@ def delete_budget(request: Request, budget_id: int, csrf_token: str = Form(...))
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         budget = database.scalar(
             select(WebBudget).where(
                 WebBudget.id == budget_id, WebBudget.user_id == user.id
@@ -677,7 +738,7 @@ def account_page(request: Request):
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         return render(request, "account.html", user=user)
 
 
@@ -694,7 +755,7 @@ def update_profile(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         if len(username) < 2 or len(username) > 50 or not is_valid_email(email):
             add_message(request, "用户名或邮箱格式不正确。", "error")
             return redirect("/account")
@@ -722,7 +783,7 @@ def update_password(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         if not verify_password(current_password, user.password_hash):
             add_message(request, "当前密码不正确。", "error")
         elif len(new_password) < 8 or len(new_password) > 128:
@@ -747,7 +808,7 @@ def delete_account(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         if confirmation != "DELETE" or not verify_password(password, user.password_hash):
             add_message(request, "删除确认文字或密码不正确。", "error")
             return redirect("/account")
