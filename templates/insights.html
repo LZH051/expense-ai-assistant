@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}AI 分析｜安心账本{% endblock %}
+{% block content %}
+<section class="page-shell app-page narrow-page">
+    <div class="page-heading"><span class="eyebrow">智能助手</span><h1>AI 消费分析</h1><p>基于你的聚合统计生成建议，分析结果按月保存，浏览不会重复调用接口。</p></div>
+
+    {% if not ai_ready %}
+    <section class="panel">
+        <div class="empty-state"><b>尚未配置 AI 接口</b><p>在服务端设置 AI_API_KEY、AI_BASE_URL 和 AI_MODEL 环境变量后，这里就可以生成消费分析。</p></div>
+    </section>
+    {% else %}
+    <section class="panel form-panel">
+        <h2>生成本月分析</h2>
+        <p class="muted">调用大模型接口可能产生费用，生成前需要确认。同一个月重复生成会覆盖上一次的结果。</p>
+        <form class="form-stack" method="post" action="/insights/generate">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label class="checkbox-row"><input type="checkbox" name="confirm_paid" required>我知道本次调用可能产生费用</label>
+            <button class="button" type="submit">生成 AI 分析</button>
+        </form>
+    </section>
+    {% endif %}
+
+    {% if analyses %}
+    {% for analysis in analyses %}
+    <section class="panel insight-card">
+        <div class="panel-heading"><div><h2>{{ analysis.month }} 月度分析</h2><p>由 {{ analysis.model_name }} 生成，仅供参考</p></div></div>
+        <p class="insight-content">{{ analysis.content }}</p>
+    </section>
+    {% endfor %}
+    {% elif ai_ready %}
+    <section class="panel"><div class="empty-state"><b>还没有分析结果</b><p>点击上方按钮生成本月的第一份消费分析。</p></div></section>
+    {% endif %}
+</section>
+{% endblock %}

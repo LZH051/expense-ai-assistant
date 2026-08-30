@@ -4,22 +4,27 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="安全、清晰的个人消费与预算管理工具">
+    <meta name="theme-color" content="#167a5a">
     <title>{% block title %}安心账本{% endblock %}</title>
-    <link rel="stylesheet" href="{{ request.url_for('static', path='style.css') }}?v=20260824-2">
-    <script defer src="{{ request.url_for('static', path='app.js') }}"></script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23167a5a'/%3E%3Ctext x='50' y='70' font-size='54' text-anchor='middle' fill='white' font-family='sans-serif'%3E安%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="{{ request.url_for('static', path='style.css') }}?v=20260829-1">
+    <script defer src="{{ request.url_for('static', path='app.js') }}?v=20260829-1"></script>
 </head>
 <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
     <header class="site-header">
+        <div class="header-inner">
         <a class="brand" href="{{ '/dashboard' if current_user else '/' }}">
-            <span class="brand-mark">安</span>
+            <span class="brand-mark" aria-hidden="true">安</span>
             <span>安心账本</span>
         </a>
         {% if current_user %}
-        <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false">☰</button>
-        <nav class="main-nav" aria-label="主要导航">
+        <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false" aria-controls="main-nav">☰</button>
+        <nav class="main-nav" id="main-nav" aria-label="主要导航">
             <a href="/dashboard">概览</a>
             <a href="/expenses">消费记录</a>
             <a href="/budgets">预算</a>
+            <a href="/insights">AI 分析</a>
             <a href="/account">账户</a>
             <form action="/logout" method="post">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -32,6 +37,7 @@
             <a class="button button-small" href="/register">免费注册</a>
         </nav>
         {% endif %}
+        </div>
     </header>
 
     {% if messages %}
@@ -42,10 +48,13 @@
     </section>
     {% endif %}
 
-    <main>{% block content %}{% endblock %}</main>
+    <main id="main">{% block content %}{% endblock %}</main>
     <footer class="site-footer">
+        <div class="footer-inner">
         <span>安心账本</span>
         <span>你的数据，只属于你的账户</span>
+        </div>
     </footer>
+    {% block scripts %}{% endblock %}
 </body>
 </html>

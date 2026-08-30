@@ -1,3 +1,4 @@
+import logging
 import csv
 import json
 from datetime import datetime
@@ -9,6 +10,8 @@ from paths import (
     RAW_DATA_FILE,
     ensure_directories,
 )
+
+logger = logging.getLogger(__name__)
 
 
 FIELDNAMES = [
@@ -88,14 +91,9 @@ def clean_expense_data() -> list[dict[str, str]]:
         row["amount"] = amount
         row["expense_date"] = expense_date
 
-        duplicate_key = (
-            row["user_id"],
-            row["expense_date"],
-            row["category"],
-            row["amount"],
-            row["merchant"],
-            row["description"],
-        )
+        # 幂等去重：record_id 是业务主键（数据库层 source_record_id 也以它唯一），
+        # 只有同一条记录被重复导入才算重复；字段全同但 record_id 不同是两笔真实消费
+        duplicate_key = (row["record_id"],)
         if duplicate_key in seen_keys:
             report["removed_duplicate"] += 1
             continue
@@ -115,16 +113,19 @@ def clean_expense_data() -> list[dict[str, str]]:
         encoding="utf-8",
     )
 
-    print(f"清洗前记录数：{report['raw_count']}")
-    print(f"修复空类别：{report['fixed_empty_category']}")
-    print(f"删除非法金额：{report['removed_invalid_amount']}")
-    print(f"删除非法日期：{report['removed_invalid_date']}")
-    print(f"删除重复记录：{report['removed_duplicate']}")
-    print(f"清洗后记录数：{report['clean_count']}")
-    print(f"清洗结果：{CLEAN_DATA_FILE}")
+    logger.info(f"清洗前记录数：{report['raw_count']}")
+    logger.info(f"修复空类别：{report['fixed_empty_category']}")
+    logger.info(f"删除非法金额：{report['removed_invalid_amount']}")
+    logger.info(f"删除非法日期：{report['removed_invalid_date']}")
+    logger.info(f"删除重复记录：{report['removed_duplicate']}")
+    logger.info(f"清洗后记录数：{report['clean_count']}")
+    logger.info(f"清洗结果：{CLEAN_DATA_FILE}")
     return cleaned_rows
 
 
 if __name__ == "__main__":
+    from logging_setup import configure_logging
+
+    configure_logging()
     clean_expense_data()
 

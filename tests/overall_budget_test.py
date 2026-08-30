@@ -38,7 +38,7 @@ def post_budget(client: TestClient, category: str, amount: str) -> None:
     assert response.status_code == 303
 
 
-def main() -> None:
+def test_overall_budget_precedence() -> None:
     with TestClient(app) as client:
         register_page = client.get("/register")
         response = client.post(
@@ -69,4 +69,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    test_overall_budget_precedence()

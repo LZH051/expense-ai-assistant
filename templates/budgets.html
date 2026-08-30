@@ -12,11 +12,11 @@
                 <label>预算类别
                     <select name="category" required>
                         <option value="" disabled selected>请选择预算类别</option>
-                        {% for category in ['全部类别', '餐饮', '交通', '购物', '居住', '娱乐', '医疗', '教育', '旅行', '其他'] %}<option value="{{ category }}">{{ category }}</option>{% endfor %}
+                        {% for category in categories %}<option value="{{ category }}">{{ category }}</option>{% endfor %}
                     </select>
                 </label>
                 <small class="muted">“全部类别”表示这个月所有消费合计的总预算。</small>
-                <label>预算金额<input type="text" inputmode="decimal" name="amount" required pattern="[0-9]+([.][0-9]{1,2})?" maxlength="14" placeholder="例如：1000.00"></label>
+                <label>预算金额<input type="text" inputmode="decimal" name="amount" required pattern="[0-9]+([.][0-9]{1,2})?" maxlength="14" placeholder="例如：1000.00" title="请输入数字，最多两位小数"></label>
                 <button class="button button-full" type="submit">保存预算</button>
             </form>
         </section>
@@ -26,8 +26,10 @@
             <div class="budget-list">
                 {% for budget in budgets %}
                 <article>
-                    <span class="category-badge">{{ budget.category[0] }}</span>
-                    <span><b>{{ budget.category }}</b><small>{{ budget.budget_month }}</small></span>
+                    <span class="category-badge" aria-hidden="true">{{ budget.category[0] }}</span>
+                    {% set spent = spent_map.get(budget.category) if budget.budget_month == current_month else none %}
+                    <span><b>{{ budget.category }}</b><small>{{ budget.budget_month }}{% if spent is not none %} · 已用 ¥ {{ '%.2f'|format(spent) }}{% endif %}</small>
+                    {% if spent is not none and budget.amount %}<span class="mini-track {% if spent > budget.amount %}over{% endif %}" aria-hidden="true"><span style="width: {{ [100, ((spent / budget.amount * 100)|round)]|min }}%"></span></span>{% endif %}</span>
                     <strong>¥ {{ '%.2f'|format(budget.amount) }}</strong>
                     <form method="post" action="/budgets/{{ budget.id }}/delete" data-confirm="确定删除这条预算吗？">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -36,7 +38,7 @@
                 </article>
                 {% endfor %}
             </div>
-            {% else %}<div class="empty-state"><b>还没有预算</b><p>从左侧设置第一条预算。</p></div>{% endif %}
+            {% else %}<div class="empty-state"><b>还没有预算</b><p>在上方或左侧的表单里设置第一条预算。</p></div>{% endif %}
         </section>
     </div>
 </section>

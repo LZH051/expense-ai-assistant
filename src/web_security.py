@@ -57,3 +57,8 @@ def valid_csrf_token(session: dict, submitted_token: str) -> bool:
     return bool(expected and submitted_token) and hmac.compare_digest(
         expected, submitted_token
     )
+
+
+# 供"邮箱不存在"分支做等时校验：不执行 scrypt 的短路路径与正常
+# 路径响应时间差两个数量级，足以枚举注册邮箱（时序侧信道）
+DUMMY_PASSWORD_HASH = hash_password("timing-equalizer-not-a-real-password")

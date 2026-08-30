@@ -23,7 +23,7 @@ def csrf_from(html: str) -> str:
     return match.group(1)
 
 
-def main() -> None:
+def test_budget_warning() -> None:
     with TestClient(app) as client:
         register_page = client.get("/register")
         response = client.post(
@@ -76,4 +76,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    test_budget_warning()

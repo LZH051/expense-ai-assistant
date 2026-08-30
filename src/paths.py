@@ -13,6 +13,7 @@ CATEGORY_SUMMARY_FILE = OUTPUT_DIR / "category_summary.csv"
 MONTHLY_SUMMARY_FILE = OUTPUT_DIR / "monthly_summary.csv"
 STATISTICS_JSON_FILE = OUTPUT_DIR / "statistics.json"
 AI_ANALYSIS_FILE = OUTPUT_DIR / "ai_analysis.txt"
+AI_USAGE_FILE = OUTPUT_DIR / "ai_usage.jsonl"
 DATABASE_FILE = DATABASE_DIR / "expense_ai.db"
 SCHEMA_FILE = DATABASE_DIR / "schema.sql"
 

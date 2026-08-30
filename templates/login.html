@@ -6,7 +6,7 @@
         <span class="eyebrow">欢迎回来</span>
         <h1>登录账户</h1>
         <p class="muted">继续查看你的消费、预算和统计。</p>
-        {% if errors %}<div class="form-errors">{% for error in errors %}<p>{{ error }}</p>{% endfor %}</div>{% endif %}
+        {% if errors %}<div class="form-errors" role="alert">{% for error in errors %}<p>{{ error }}</p>{% endfor %}</div>{% endif %}
         <form class="form-stack" method="post" action="/login">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label>邮箱<input type="email" name="email" required autocomplete="email" value="{{ form.email if form else '' }}"></label>

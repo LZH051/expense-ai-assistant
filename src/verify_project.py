@@ -1,7 +1,10 @@
+import logging
 import csv
 
 from db import connect_to_database, get_database_path
 from paths import CLEAN_DATA_FILE, RAW_DATA_FILE
+
+logger = logging.getLogger(__name__)
 
 
 def count_csv_rows(path) -> int:
@@ -60,17 +63,20 @@ def verify_project() -> None:
 
     manual_count = len(database_source_ids - clean_source_ids)
 
-    print(f"SQLite：{get_database_path()}")
-    print(f"数据库表：{', '.join(sorted(required_tables))}")
-    print(f"原始数据：{raw_count} 条")
-    print(f"清洗数据：{clean_count} 条")
-    print(f"用户：{user_count} 条")
-    print(f"消费记录：{expense_count} 条")
-    print(f"额外手动录入：{manual_count} 条")
-    print(f"预算：{budget_count} 条")
-    print("外键数据检查：通过")
-    print("项目A SQLite 验收：通过")
+    logger.info(f"SQLite：{get_database_path()}")
+    logger.info(f"数据库表：{', '.join(sorted(required_tables))}")
+    logger.info(f"原始数据：{raw_count} 条")
+    logger.info(f"清洗数据：{clean_count} 条")
+    logger.info(f"用户：{user_count} 条")
+    logger.info(f"消费记录：{expense_count} 条")
+    logger.info(f"额外手动录入：{manual_count} 条")
+    logger.info(f"预算：{budget_count} 条")
+    logger.info("外键数据检查：通过")
+    logger.info("项目A SQLite 验收：通过")
 
 
 if __name__ == "__main__":
+    from logging_setup import configure_logging
+
+    configure_logging()
     verify_project()

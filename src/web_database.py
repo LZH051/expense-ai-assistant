@@ -10,6 +10,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 
+def is_production() -> bool:
+    """Vercel 或显式 APP_ENV=production/staging 都视为线上环境。"""
+    return bool(
+        os.getenv("VERCEL")
+        or os.getenv("APP_ENV", "").strip().lower()
+        in {"production", "prod", "staging"}
+    )
+
+
 def get_database_url() -> str:
     configured = os.getenv("DATABASE_URL", "").strip()
     if configured:
@@ -18,6 +27,11 @@ def get_database_url() -> str:
         if configured.startswith("postgresql://"):
             return configured.replace("postgresql://", "postgresql+psycopg://", 1)
         return configured
+
+    if is_production():
+        # 不允许静默回落到本地 SQLite：serverless 实例的磁盘是临时的，
+        # 各实例各写各的文件，数据会随实例回收永久丢失
+        raise RuntimeError("线上部署必须配置 DATABASE_URL 环境变量。")
 
     database_path = (PROJECT_ROOT / "database" / "web_expense.db").resolve()
     database_path.parent.mkdir(parents=True, exist_ok=True)

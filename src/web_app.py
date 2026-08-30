@@ -1,21 +1,46 @@
+import logging
 import os
+import time
 from contextlib import asynccontextmanager
-from datetime import date
-from decimal import Decimal, InvalidOperation
+from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from web_database import Base, SessionLocal, engine
+from logging_setup import configure_logging
+from web_api import router as api_router
+from web_database import Base, SessionLocal, engine, is_production
 from web_models import WebBudget, WebExpense, WebUser
+from web_services import (
+    BUDGET_CATEGORIES,
+    clear_login_failures,
+    record_login_failure,
+    too_many_login_failures,
+    validate_budget_month,
+    EXPENSE_CATEGORIES,
+    budget_status,
+    category_summary,
+    get_owned_expense,
+    load_user,
+    monthly_summary,
+    parse_amount,
+    parse_expense_date,
+    query_expenses_page,
+    validate_expense_fields,
+)
 from web_security import (
+    DUMMY_PASSWORD_HASH,
     get_csrf_token,
     hash_password,
     is_valid_email,
@@ -29,13 +54,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 STATIC_DIR = PROJECT_ROOT / "static"
 SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
-EXPENSE_CATEGORIES = (
-    "餐饮", "交通", "购物", "居住", "娱乐",
-    "医疗", "教育", "旅行", "其他",
-)
-BUDGET_CATEGORIES = ("全部类别", *EXPENSE_CATEGORIES)
 
-if os.getenv("VERCEL") and not SESSION_SECRET:
+# 守卫按"是否线上"判断而不是"是否 Vercel"：换 Docker/VPS 部署时
+# 同样不允许启用仓库里公开的开发密钥
+if is_production() and not SESSION_SECRET:
     raise RuntimeError("线上部署必须配置 SESSION_SECRET 环境变量。")
 if not SESSION_SECRET:
     SESSION_SECRET = "local-development-only-change-before-deployment"
@@ -54,16 +76,38 @@ async def lifespan(_app: FastAPI):
     yield
 
 
+configure_logging()
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="安心账本", lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
     same_site="lax",
-    https_only=bool(os.getenv("VERCEL")),
+    https_only=is_production(),
     max_age=60 * 60 * 24 * 14,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    started_at = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("%s %s 未捕获异常", request.method, request.url.path)
+        raise
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    logger.info(
+        "%s %s %s %.0fms",
+        request.method,
+        request.url.path,
+        response.status_code,
+        elapsed_ms,
+    )
+    return response
 
 
 @app.middleware("http")
@@ -73,6 +117,24 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # style-src 需放行内联样式：模板里的条形图/进度条宽度和
+    # Chart.js 都依赖 style 属性；script-src 保持严格 'self'
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; "
+        "form-action 'self'"
+    )
+    if is_production():
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=63072000; includeSubDomains"
+        )
+    # 含账目和 CSRF token 的页面禁止缓存：共享设备按"后退"不应看到
+    # 上一个用户的账单，边缘节点也不应缓存
+    if request.url.path.startswith(
+        ("/dashboard", "/expenses", "/budgets", "/account", "/insights")
+    ):
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 
@@ -87,10 +149,7 @@ def add_message(request: Request, text: str, kind: str = "success") -> None:
 
 
 def current_user(request: Request, database: Session) -> WebUser | None:
-    user_id = request.session.get("user_id")
-    if not isinstance(user_id, int):
-        return None
-    return database.get(WebUser, user_id)
+    return load_user(database, request.session)
 
 
 def render(
@@ -99,9 +158,15 @@ def render(
     *,
     user: WebUser | None = None,
     status_code: int = 200,
+    consume_messages: bool = True,
     **context,
 ) -> HTMLResponse:
-    messages = request.session.pop("messages", [])
+    # 404 等"用户不一定看到"的页面不消费 flash（浏览器自动请求
+    # /favicon.ico 也会走 404 处理器，不能把排队的提示吞掉）
+    if consume_messages:
+        messages = request.session.pop("messages", [])
+    else:
+        messages = request.session.get("messages", [])
     values = {
         "request": request,
         "current_user": user,
@@ -117,41 +182,105 @@ def render(
     )
 
 
+class CsrfError(Exception):
+    pass
+
+
 def require_csrf(request: Request, submitted_token: str) -> None:
     if not valid_csrf_token(request.session, submitted_token):
-        raise HTTPException(status_code=400, detail="请求已失效，请刷新页面后重试。")
+        raise CsrfError
 
 
-def parse_amount(value: str) -> Decimal:
-    try:
-        amount = Decimal(value.strip()).quantize(Decimal("0.01"))
-    except (InvalidOperation, ValueError):
-        raise ValueError("请输入有效金额。") from None
-    if amount < 0 or amount > Decimal("9999999999.99"):
-        raise ValueError("金额必须在 0 至 9999999999.99 之间。")
-    return amount
+def safe_referer_path(request: Request) -> str:
+    """只跳回同源路径，防止 Referer 被用作 open redirect。"""
+    referer = urlparse(request.headers.get("referer", ""))
+    if referer.netloc in ("", request.url.netloc) and referer.path.startswith("/"):
+        return referer.path
+    return "/"
 
 
-def parse_expense_date(value: str) -> date:
-    try:
-        parsed = date.fromisoformat(value.strip())
-    except ValueError:
-        raise ValueError("请输入有效日期。") from None
-    return parsed
+@app.exception_handler(CsrfError)
+def handle_csrf_error(request: Request, _error: CsrfError):
+    message = "请求已失效，请刷新页面后重试。"
+    if request.url.path.startswith("/api/"):
+        return api_error(400, message)
+    # 匿名会话本来就没有 CSRF token，真实原因是未登录
+    if not isinstance(request.session.get("user_id"), int):
+        return require_login(request)
+    add_message(request, message, "error")
+    return redirect(safe_referer_path(request))
 
 
-def validate_expense_fields(category: str, merchant: str, description: str) -> None:
-    if category.strip() not in EXPENSE_CATEGORIES:
-        raise ValueError("请选择有效的消费类别。")
-    if len(merchant.strip()) > 120:
-        raise ValueError("商户名称不能超过120个字符。")
-    if len(description.strip()) > 1000:
-        raise ValueError("说明不能超过1000个字符。")
+def require_login(request: Request) -> RedirectResponse:
+    add_message(request, "请先登录。", "error")
+    return redirect("/login")
+
+
+API_ERROR_CODES = {
+    400: "bad_request", 401: "unauthorized", 403: "forbidden",
+    404: "not_found", 405: "method_not_allowed", 409: "conflict",
+    422: "validation_error", 429: "too_many_requests",
+    500: "internal_error", 503: "service_unavailable",
+}
+
+
+def api_error(status_code: int, message: str, details=None) -> JSONResponse:
+    body = {
+        "error": {
+            "code": API_ERROR_CODES.get(status_code, "error"),
+            "message": message,
+        }
+    }
+    if details:
+        body["error"]["details"] = details
+    return JSONResponse(body, status_code=status_code)
+
+
+@app.exception_handler(StarletteHTTPException)
+def handle_http_exception(request: Request, error: StarletteHTTPException):
+    # API 走统一 JSON 错误封装；页面 404 渲染友好页面
+    if request.url.path.startswith("/api/"):
+        return api_error(error.status_code, str(error.detail))
+    if error.status_code == 404:
+        with SessionLocal() as database:
+            user = current_user(request, database)
+            return render(
+                request, "404.html", user=user, status_code=404,
+                consume_messages=False,
+            )
+    return JSONResponse(
+        {"detail": str(error.detail)}, status_code=error.status_code
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_validation_error(request: Request, error: RequestValidationError):
+    if request.url.path.startswith("/api/"):
+        details = [
+            {
+                "field": ".".join(
+                    str(part) for part in item.get("loc", []) if part != "body"
+                ),
+                "message": item.get("msg", ""),
+            }
+            for item in error.errors()
+        ]
+        message = details[0]["message"] if details else "请求参数不合法。"
+        return api_error(422, message, details=details)
+    return await request_validation_exception_handler(request, error)
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health():
+    try:
+        with SessionLocal() as database:
+            database.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("健康检查：数据库探测失败")
+        return JSONResponse(
+            {"status": "degraded", "database": "error"}, status_code=503
+        )
+    return {"status": "ok", "database": "ok"}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -239,13 +368,24 @@ def login(
     require_csrf(request, csrf_token)
     email = normalize_email(email)
     with SessionLocal() as database:
+        if too_many_login_failures(database, email):
+            return render(
+                request, "login.html",
+                errors=["尝试次数过多，请约 15 分钟后再试。"],
+                form={"email": email}, status_code=429,
+            )
         user = database.scalar(select(WebUser).where(WebUser.email == email))
-        if user is None or not verify_password(password, user.password_hash):
+        # 邮箱不存在时也执行一次哈希校验：让两条路径耗时一致，
+        # 否则响应时间差可用于枚举注册邮箱
+        stored_hash = user.password_hash if user else DUMMY_PASSWORD_HASH
+        if user is None or not verify_password(password, stored_hash):
+            record_login_failure(database, email)
             return render(
                 request, "login.html",
                 errors=["邮箱或密码不正确。"],
                 form={"email": email}, status_code=401,
             )
+        clear_login_failures(database, email)
         request.session.clear()
         request.session["user_id"] = user.id
         get_csrf_token(request.session)
@@ -265,65 +405,44 @@ def dashboard(request: Request):
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
 
         today = date.today()
-        month_key = today.strftime("%Y-%m")
         total = database.scalar(
             select(func.coalesce(func.sum(WebExpense.amount), 0)).where(
                 WebExpense.user_id == user.id
             )
         )
-        month_total = database.scalar(
-            select(func.coalesce(func.sum(WebExpense.amount), 0)).where(
-                WebExpense.user_id == user.id,
-                func.strftime("%Y-%m", WebExpense.expense_date) == month_key
-                if engine.dialect.name == "sqlite"
-                else func.to_char(WebExpense.expense_date, "YYYY-MM") == month_key,
-            )
-        )
         count = database.scalar(
             select(func.count(WebExpense.id)).where(WebExpense.user_id == user.id)
         )
-        category_rows = database.execute(
-            select(WebExpense.category, func.sum(WebExpense.amount).label("total"))
-            .where(WebExpense.user_id == user.id)
-            .group_by(WebExpense.category)
-            .order_by(func.sum(WebExpense.amount).desc())
-            .limit(6)
-        ).all()
+        category_rows = category_summary(database, user.id, limit=6)
         recent = database.scalars(
             select(WebExpense)
             .where(WebExpense.user_id == user.id)
             .order_by(WebExpense.expense_date.desc(), WebExpense.id.desc())
             .limit(8)
         ).all()
-        overall_budget = database.scalar(
-            select(WebBudget.amount).where(
-                WebBudget.user_id == user.id,
-                WebBudget.budget_month == month_key,
-                WebBudget.category == "全部类别",
-            )
-        )
-        if overall_budget is not None:
-            budget_total = overall_budget
-        else:
-            budget_total = database.scalar(
-                select(func.coalesce(func.sum(WebBudget.amount), 0)).where(
-                    WebBudget.user_id == user.id,
-                    WebBudget.budget_month == month_key,
-                )
-            )
-        budget_total = Decimal(str(budget_total or 0))
-        month_total = Decimal(str(month_total or 0))
-        budget_remaining = budget_total - month_total
-        budget_exceeded = budget_total > 0 and budget_remaining < 0
+        budgets = budget_status(database, user.id, today)
+        category_chart = [
+            {"label": row.category, "value": float(row.total)}
+            for row in category_rows
+        ]
+        monthly_chart = [
+            {"month": row["month"], "value": float(row["total"])}
+            for row in monthly_summary(database, user.id)
+        ]
         return render(
             request, "dashboard.html", user=user, total=total,
-            month_total=month_total, expense_count=count, recent=recent,
-            category_rows=category_rows, month_key=month_key,
-            budget_total=budget_total, budget_remaining=budget_remaining,
-            budget_exceeded=budget_exceeded,
+            month_total=budgets["month_total"], expense_count=count,
+            recent=recent, category_rows=category_rows,
+            category_chart=category_chart, monthly_chart=monthly_chart,
+            month_key=budgets["month_key"],
+            budget_total=budgets["budget_total"],
+            budget_remaining=budgets["budget_remaining"],
+            budget_exceeded=budgets["budget_exceeded"],
+            has_overall_budget=budgets["has_overall_budget"],
+            category_overruns=budgets["category_overruns"],
         )
 
 
@@ -333,11 +452,12 @@ def expenses_page(
     category: str = "",
     start_date: str = "",
     end_date: str = "",
+    page: int = 1,
 ):
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
 
         selected_category = category.strip()
         selected_start_date = start_date.strip()
@@ -360,18 +480,31 @@ def expenses_page(
             add_message(request, str(error), "error")
             return redirect("/expenses")
 
-        query = select(WebExpense).where(WebExpense.user_id == user.id)
-        if selected_category:
-            query = query.where(WebExpense.category == selected_category)
-        if parsed_start_date is not None:
-            query = query.where(WebExpense.expense_date >= parsed_start_date)
-        if parsed_end_date is not None:
-            query = query.where(WebExpense.expense_date <= parsed_end_date)
-        expenses = database.scalars(
-            query.order_by(WebExpense.expense_date.desc(), WebExpense.id.desc())
-        ).all()
+        result = query_expenses_page(
+            database, user.id,
+            category=selected_category,
+            start=parsed_start_date, end=parsed_end_date,
+            page=page,
+        )
+        filter_query = "&".join(
+            f"{key}={value}"
+            for key, value in (
+                ("category", selected_category),
+                ("start_date", selected_start_date),
+                ("end_date", selected_end_date),
+            )
+            if value
+        )
+        today = date.today()
         return render(
-            request, "expenses.html", user=user, expenses=expenses,
+            request, "expenses.html", user=user,
+            month_start=today.replace(day=1).isoformat(),
+            days30_start=(today - timedelta(days=29)).isoformat(),
+            expenses=result["items"],
+            total_count=result["total"],
+            total_amount=result["total_amount"],
+            page=result["page"], pages=result["pages"],
+            filter_query=filter_query,
             categories=EXPENSE_CATEGORIES,
             selected_category=selected_category,
             selected_start_date=selected_start_date,
@@ -384,10 +517,11 @@ def new_expense_page(request: Request):
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         return render(
             request, "expense_form.html", user=user, expense=None,
             form={"expense_date": date.today().isoformat()},
+            categories=EXPENSE_CATEGORIES,
         )
 
 
@@ -405,7 +539,7 @@ def create_expense(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         form = {
             "expense_date": expense_date, "category": category,
             "amount": amount, "merchant": merchant,
@@ -419,6 +553,7 @@ def create_expense(
             return render(
                 request, "expense_form.html", user=user, expense=None,
                 form=form, errors=[str(error)], status_code=422,
+                categories=EXPENSE_CATEGORIES,
             )
         database.add(
             WebExpense(
@@ -438,7 +573,7 @@ def edit_expense_page(request: Request, expense_id: int):
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         expense = database.scalar(
             select(WebExpense).where(
                 WebExpense.id == expense_id, WebExpense.user_id == user.id
@@ -448,6 +583,7 @@ def edit_expense_page(request: Request, expense_id: int):
             raise HTTPException(status_code=404, detail="消费记录不存在。")
         return render(
             request, "expense_form.html", user=user, expense=expense, form={},
+            categories=EXPENSE_CATEGORIES,
         )
 
 
@@ -466,7 +602,7 @@ def update_expense_route(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         expense = database.scalar(
             select(WebExpense).where(
                 WebExpense.id == expense_id, WebExpense.user_id == user.id
@@ -487,6 +623,7 @@ def update_expense_route(
             return render(
                 request, "expense_form.html", user=user, expense=expense,
                 form=form, errors=[str(error)], status_code=422,
+                categories=EXPENSE_CATEGORIES,
             )
         expense.expense_date = parsed_date
         expense.category = category.strip()
@@ -504,7 +641,7 @@ def delete_expense(request: Request, expense_id: int, csrf_token: str = Form(...
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         expense = database.scalar(
             select(WebExpense).where(
                 WebExpense.id == expense_id, WebExpense.user_id == user.id
@@ -523,15 +660,22 @@ def budgets_page(request: Request):
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         budgets = database.scalars(
             select(WebBudget).where(WebBudget.user_id == user.id)
             .order_by(WebBudget.budget_month.desc(), WebBudget.category)
         ).all()
+        status = budget_status(database, user.id, date.today())
+        spent_map = {
+            item["category"]: item["spent"]
+            for item in status["category_statuses"]
+        }
+        spent_map["全部类别"] = status["month_total"]
         return render(
             request, "budgets.html", user=user, budgets=budgets,
-            current_month=date.today().strftime("%Y-%m"),
+            current_month=status["month_key"],
             categories=BUDGET_CATEGORIES,
+            spent_map=spent_map,
         )
 
 
@@ -547,9 +691,9 @@ def save_budget(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         try:
-            date.fromisoformat(f"{budget_month}-01")
+            budget_month = validate_budget_month(budget_month)
             parsed_amount = parse_amount(amount)
             if category.strip() not in BUDGET_CATEGORIES:
                 raise ValueError("请选择有效的预算类别。")
@@ -566,6 +710,7 @@ def save_budget(
         if budget:
             budget.amount = parsed_amount
             message = "预算已更新。"
+            database.commit()
         else:
             database.add(
                 WebBudget(
@@ -574,7 +719,23 @@ def save_budget(
                 )
             )
             message = "预算已创建。"
-        database.commit()
+            try:
+                database.commit()
+            except IntegrityError:
+                # 表单重复提交/并发：另一请求刚插入同一条，改为更新
+                database.rollback()
+                existing = database.scalar(
+                    select(WebBudget).where(
+                        WebBudget.user_id == user.id,
+                        WebBudget.budget_month == budget_month,
+                        WebBudget.category == category.strip(),
+                    )
+                )
+                if existing is None:
+                    raise
+                existing.amount = parsed_amount
+                database.commit()
+                message = "预算已更新。"
         add_message(request, message)
     return redirect("/budgets")
 
@@ -585,7 +746,7 @@ def delete_budget(request: Request, budget_id: int, csrf_token: str = Form(...))
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         budget = database.scalar(
             select(WebBudget).where(
                 WebBudget.id == budget_id, WebBudget.user_id == user.id
@@ -599,12 +760,59 @@ def delete_budget(request: Request, budget_id: int, csrf_token: str = Form(...))
     return redirect("/budgets")
 
 
+@app.get("/insights", response_class=HTMLResponse)
+def insights_page(request: Request):
+    with SessionLocal() as database:
+        user = current_user(request, database)
+        if user is None:
+            return require_login(request)
+        import web_insights
+
+        return render(
+            request, "insights.html", user=user,
+            ai_ready=web_insights.ai_configured(),
+            analyses=web_insights.list_insights(database, user.id),
+        )
+
+
+@app.post("/insights/generate")
+def generate_insight_route(
+    request: Request,
+    csrf_token: str = Form(...),
+    confirm_paid: str = Form(""),
+):
+    require_csrf(request, csrf_token)
+    with SessionLocal() as database:
+        user = current_user(request, database)
+        if user is None:
+            return require_login(request)
+        if not confirm_paid:
+            add_message(request, "请先勾选费用确认。", "error")
+            return redirect("/insights")
+        import web_insights
+
+        if not web_insights.ai_configured():
+            add_message(request, "尚未配置 AI 接口，无法生成分析。", "error")
+            return redirect("/insights")
+        try:
+            web_insights.generate_insight(database, user)
+        except Exception:
+            logger.exception("AI 分析生成失败 user=%s", user.id)
+            add_message(
+                request, "AI 分析生成失败，请稍后再试；本次未保存结果。",
+                "error",
+            )
+            return redirect("/insights")
+        add_message(request, "本月 AI 分析已生成。")
+    return redirect("/insights")
+
+
 @app.get("/account", response_class=HTMLResponse)
 def account_page(request: Request):
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         return render(request, "account.html", user=user)
 
 
@@ -621,7 +829,7 @@ def update_profile(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         if len(username) < 2 or len(username) > 50 or not is_valid_email(email):
             add_message(request, "用户名或邮箱格式不正确。", "error")
             return redirect("/account")
@@ -649,7 +857,7 @@ def update_password(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         if not verify_password(current_password, user.password_hash):
             add_message(request, "当前密码不正确。", "error")
         elif len(new_password) < 8 or len(new_password) > 128:
@@ -674,7 +882,7 @@ def delete_account(
     with SessionLocal() as database:
         user = current_user(request, database)
         if user is None:
-            return redirect("/login")
+            return require_login(request)
         if confirmation != "DELETE" or not verify_password(password, user.password_hash):
             add_message(request, "删除确认文字或密码不正确。", "error")
             return redirect("/account")
@@ -684,11 +892,7 @@ def delete_account(
     return redirect("/")
 
 
-@app.exception_handler(404)
-def not_found(request: Request, _error: HTTPException):
-    with SessionLocal() as database:
-        user = current_user(request, database)
-        return render(request, "404.html", user=user, status_code=404)
+app.include_router(api_router)
 
 
 if __name__ == "__main__":

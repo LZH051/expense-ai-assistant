@@ -2,6 +2,19 @@
 
 这份文件用于记录报错、卡点和设计选择。提交时应保留真实的开发过程。
 
+> **文档状态（2026-08-25 更新）**：下文"设计选择"与问题 1～3 记录的是
+> 早期 MySQL 版本的开发过程，作为真实踩坑历史保留，不代表当前实现。
+> 项目此后经历两次架构调整：MySQL → SQLite（命令行 ETL 版，改动清单见
+> [`sqlite_migration.md`](sqlite_migration.md)）→ 新增 Web 版（本地 SQLite
+> / 线上 Neon PostgreSQL，与命令行版数据相互独立）。
+>
+> 与当前代码不一致之处，读文档时请注意：
+>
+> - 文中"金额使用 DECIMAL(10, 2)"仅在 Web 版成立（`Numeric(12, 2)`）；
+>   命令行版的 `database/schema.sql` 中金额实际是 `REAL`（浮点），清洗
+>   阶段虽用 `Decimal` 校验、入库仍转为 float——这是一个已知的待改进项。
+> - `INSERT IGNORE` 在 SQLite 中对应写法是 `INSERT OR IGNORE`。
+
 ## 已做出的设计选择
 
 ### 1. 为什么使用 MySQL
